@@ -17,6 +17,7 @@ from .models import (
 )
 
 from .services.resume_parser import extract_resume_text
+from .services.resume_nlp import parse_resume
 
 from .permissions import (
     IsAdmin,
@@ -214,13 +215,16 @@ class ResumeUploadAPIView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+        parsed_resume = parse_resume(extracted_text)
+
         return success_response(
-            message="Resume uploaded and parsed successfully.",
+            message="Resume uploaded and analyzed successfully.",
             data={
                 "resume": serializer.data["resume"],
                 "extracted_text": extracted_text,
-            },
-            status_code=status.HTTP_200_OK,
+                "parsed_resume": parsed_resume,
+        },
+        status_code=status.HTTP_200_OK,
         )
 
 
