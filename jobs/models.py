@@ -136,3 +136,40 @@ class SavedJob(models.Model):
 
     def __str__(self):
         return f"{self.candidate.email} - {self.job.title}"
+
+
+class ATSScore(models.Model):
+
+    candidate = models.ForeignKey(
+        "accounts.CandidateProfile",
+        on_delete=models.CASCADE,
+        related_name="ats_scores",
+    )
+
+    job = models.ForeignKey(
+        Job,
+        on_delete=models.CASCADE,
+        related_name="ats_scores",
+    )
+
+    skill_score = models.FloatField(default=0)
+
+    experience_score = models.FloatField(default=0)
+
+    education_score = models.FloatField(default=0)
+
+    match_percentage = models.FloatField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("candidate", "job")
+
+    def __str__(self):
+        return (
+            f"{self.candidate.user.email} - "
+            f"{self.job.title} - "
+            f"{self.match_percentage}%"
+        )

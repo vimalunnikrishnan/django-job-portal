@@ -20,10 +20,12 @@ from rest_framework.views import APIView
 from accounts.models import AdminActionLog, CandidateProfile
 from accounts.permissions import IsEmployer, IsCandidate, IsAdmin
 from accounts.response import success_response
+from accounts.services.ats_scoring import calculate_and_save_ats_score
+from accounts.services.ats_ranking import rank_candidates_for_job
 
 from .filters import JobFilter
-from .models import Job, Application, SavedJob
-from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer
+from .models import Job, Application, SavedJob, ATSScore
+from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer
 from .constants.application_constants import (
     APPLICATION_STATUS_TRANSITIONS,
 )
@@ -624,5 +626,121 @@ class AdminJobDeactivateAPIView(APIView):
                 "is_active": job.is_active,
                 "moderation_reason": job.moderation_reason,
             },
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class JobMatchPercentageAPIView(APIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+
+        job = get_object_or_404(
+            Job,
+            pk=pk,
+            is_active=True,
+        )
+
+        try:
+
+            candidate = CandidateProfile.objects.get(
+                user=request.user,
+            )
+
+        except CandidateProfile.DoesNotExist:
+
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_404_NOT_FOUND,
+                    "errors": {
+                        "detail": "Candidate profile not found."
+                    },
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        ats_score = calculate_and_save_ats_score(
+            job,
+            candidate,
+        )
+
+        serializer = ATSScoreSerializer(
+            ats_score,
+        )
+
+        return success_response(
+            message="Job match percentage calculated successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class JobCandidateRankingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        job = get_object_or_404(
+            Job,
+            pk=pk,
+            is_active=True,
+        )
+
+        if request.user.role != "EMPLOYER":
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {
+                        "detail": "Only employers can view candidate rankings."
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if job.employer != request.user:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {
+                        "detail": "You do not have permission to view this job's candidates."
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ranked_candidates = rank_candidates_for_job(job)
+
+        data = []
+
+        for rank, item in enumerate(ranked_candidates, start=1):
+            candidate = item["candidate"]
+            application = item["application"]
+            ats_score = item["ats_score"]
+
+            data.append(
+                {
+                    "rank": rank,
+                    "candidate_id": candidate.id,
+                    "candidate_email": candidate.user.email,
+                    "application_id": application.id,
+                    "application_status": application.status,
+                    "skill_score": ats_score.skill_score,
+                    "experience_score": ats_score.experience_score,
+                    "education_score": ats_score.education_score,
+                    "match_percentage": ats_score.match_percentage,
+                }
+            )
+
+        serializer = RankedCandidateSerializer(
+            data,
+            many=True,
+        )
+
+        return success_response(
+            message="Candidate ranking retrieved successfully.",
+            data=serializer.data,
             status_code=status.HTTP_200_OK,
         )

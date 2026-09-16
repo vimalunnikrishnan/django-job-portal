@@ -17,6 +17,8 @@ from .views import (
     SavedJobListAPIView,
     UnsaveJobAPIView,
     AdminJobDeactivateAPIView,
+    JobMatchPercentageAPIView,
+    JobCandidateRankingAPIView
 )
 
 urlpatterns = [
@@ -31,6 +33,12 @@ urlpatterns = [
         "list/",
         JobListAPIView.as_view(),
         name="job-list",
+    ),
+
+    path(
+        "<int:pk>/match/",
+        JobMatchPercentageAPIView.as_view(),
+        name="job-match-percentage",
     ),
 
     path(
@@ -100,15 +108,15 @@ urlpatterns = [
     ),
 
     path(
-    "saved/",
-    SavedJobListAPIView.as_view(),
-    name="saved-jobs",
+        "saved/",
+        SavedJobListAPIView.as_view(),
+        name="saved-jobs",
     ),
 
     path(
-    "<int:pk>/save/",
-    SaveJobAPIView.as_view(),
-    name="save-job",
+        "<int:pk>/save/",
+        SaveJobAPIView.as_view(),
+        name="save-job",
     ),
 
     path(
@@ -121,5 +129,11 @@ urlpatterns = [
         "admin/<int:pk>/deactivate/",
         AdminJobDeactivateAPIView.as_view(),
         name="admin-job-deactivate",
+    ),
+
+    path(
+        "<int:pk>/candidates/ranking/",
+        JobCandidateRankingAPIView.as_view(),
+        name="job-candidate-ranking",
     ),
 ]
