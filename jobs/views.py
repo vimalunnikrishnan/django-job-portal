@@ -22,6 +22,7 @@ from accounts.permissions import IsEmployer, IsCandidate, IsAdmin
 from accounts.response import success_response
 from accounts.services.ats_scoring import calculate_and_save_ats_score
 from accounts.services.ats_ranking import rank_candidates_for_job
+from accounts.services.auto_shortlisting import auto_process_application
 
 from .filters import JobFilter
 from .models import Job, Application, SavedJob, ATSScore
@@ -467,6 +468,98 @@ class ApplicationStatusUpdateAPIView(APIView):
                 "errors": serializer.errors,
             },
             status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class AutoProcessApplicationAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        application = get_object_or_404(
+            Application,
+            pk=pk,
+        )
+
+        if application.status != "APPLIED":
+            return Response(
+        {
+            "success": False,
+            "status_code": status.HTTP_400_BAD_REQUEST,
+            "errors": {
+                "detail": (
+                    "Only applications with APPLIED status "
+                    "can be auto-processed."
+                )
+            },
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+        if request.user.role != "EMPLOYER":
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {
+                        "detail": "Only employers can auto-process applications."
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if application.job.employer != request.user:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {
+                        "detail": "You do not have permission to process this application."
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        previous_status = application.status
+
+        shortlist_threshold = request.data.get(
+            "shortlist_threshold",
+            70,
+        )
+
+        try:
+            shortlist_threshold = float(shortlist_threshold)
+        except (TypeError, ValueError):
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_400_BAD_REQUEST,
+                    "errors": {
+                        "shortlist_threshold": (
+                            "Shortlist threshold must be a valid number."
+                        )
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = auto_process_application(
+            application,
+            shortlist_threshold=shortlist_threshold,
+        )
+
+        return success_response(
+            message="Application processed successfully.",
+            data={
+                "application_id": result["application"].id,
+                "candidate_email": result["application"].candidate.email,
+                "previous_status": previous_status,
+                "new_status": result["application"].status,
+                "match_percentage": result["ats_score"].match_percentage,
+                "shortlist_threshold": shortlist_threshold,
+                "action": result["eligibility"]["action"],
+                "reason": result["eligibility"]["reason"],
+            },
+            status_code=status.HTTP_200_OK,
         )
 
 
