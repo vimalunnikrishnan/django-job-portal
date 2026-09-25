@@ -1,0 +1,11 @@
+Hello {{ candidate_name }},
+
+Your application for the position of {{ job_title }} has been successfully submitted.
+
+Job: {{ job_title }}
+Location: {{ job_location }}
+
+We will notify you when there is an update to your application.
+
+Thank you,
+Job Portal Team

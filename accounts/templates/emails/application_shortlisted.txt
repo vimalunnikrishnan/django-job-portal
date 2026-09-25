@@ -1,0 +1,10 @@
+Hello {{ candidate_name }},
+
+Congratulations!
+
+Your application for the position of {{ job_title }} has been shortlisted.
+
+The employer will contact you with the next steps.
+
+Thank you,
+Job Portal Team

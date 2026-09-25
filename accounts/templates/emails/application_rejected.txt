@@ -1,0 +1,10 @@
+Hello {{ candidate_name }},
+
+Thank you for applying for the position of {{ job_title }}.
+
+After reviewing your application, the employer has decided not to move forward with your application at this time.
+
+We appreciate your interest and wish you success in your job search.
+
+Thank you,
+Job Portal Team
