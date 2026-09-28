@@ -109,6 +109,15 @@ class Application(models.Model):
         return f"{self.candidate.email} - {self.job.title}"
 
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "-applied_at"],
+                name="application_status_applied_idx",
+            ),
+        ]
+
+
 class SavedJob(models.Model):
 
     candidate = models.ForeignKey(
