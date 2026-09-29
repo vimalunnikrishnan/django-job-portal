@@ -209,7 +209,7 @@ class ResumeUploadAPIView(APIView):
                     "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
                     "errors": {
                         "detail": "Unable to parse resume.",
-                        "error": str(e),
+                        "error": "Internal resume processing error.",
                     },
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
