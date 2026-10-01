@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     ApplyJobAPIView,
+    AIInterviewAPIView,
     FeaturedJobListAPIView,
     LatestJobListAPIView,
     JobCreateAPIView,
@@ -142,5 +143,11 @@ urlpatterns = [
         "applications/<int:pk>/auto-process/",
         AutoProcessApplicationAPIView.as_view(),
         name="application-auto-process",
+    ),
+
+    path(
+        "applications/<int:pk>/ai-interview/",
+        AIInterviewAPIView.as_view(),
+        name="application-ai-interview",
     ),
 ]

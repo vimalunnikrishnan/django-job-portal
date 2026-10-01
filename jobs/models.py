@@ -182,3 +182,98 @@ class ATSScore(models.Model):
             f"{self.job.title} - "
             f"{self.match_percentage}%"
         )
+
+
+class AIInterview(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("SCHEDULED", "Scheduled"),
+        ("IN_PROGRESS", "In Progress"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    ]
+
+    application = models.OneToOneField(
+        Application,
+        on_delete=models.CASCADE,
+        related_name="ai_interview",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+
+    call_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
+    final_score = models.FloatField(
+        null=True,
+        blank=True,
+    )
+
+    started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"AI Interview - {self.application}"
+
+
+class AIInterviewQuestion(models.Model):
+    interview = models.ForeignKey(
+        AIInterview,
+        on_delete=models.CASCADE,
+        related_name="questions",
+    )
+
+    question = models.TextField()
+
+    sequence_number = models.PositiveIntegerField()
+
+    answer = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    transcript = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    score = models.FloatField(
+        null=True,
+        blank=True,
+    )
+
+    feedback = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sequence_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["interview", "sequence_number"],
+                name="unique_interview_question_sequence",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Question {self.sequence_number} - {self.interview}"

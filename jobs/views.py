@@ -24,9 +24,11 @@ from accounts.response import success_response
 from accounts.services.ats_scoring import calculate_and_save_ats_score
 from accounts.services.ats_ranking import rank_candidates_for_job
 from accounts.services.auto_shortlisting import auto_process_application
+from jobs.services.ai_interview_service import create_ai_interview
+from jobs.tasks import start_ai_interview_task
 
 from .filters import JobFilter
-from .models import Job, Application, SavedJob, ATSScore
+from .models import Job, Application, SavedJob, ATSScore, AIInterview
 from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer
 from .constants.application_constants import (
     APPLICATION_STATUS_TRANSITIONS,
@@ -275,6 +277,65 @@ class ApplyJobAPIView(APIView):
             status_code=status.HTTP_201_CREATED,
         )
     
+
+class AIInterviewAPIView(APIView):
+
+    permission_classes = [IsCandidate]
+
+    def post(self, request, pk):
+
+        application = get_object_or_404(
+            Application.objects.select_related("job", "candidate"),
+            pk=pk,
+            candidate=request.user,
+        )
+
+        if application.status != "SHORTLISTED":
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_400_BAD_REQUEST,
+                    "errors": {
+                        "detail": (
+                            "AI interview is available only for "
+                            "shortlisted applications."
+                        )
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        interview, created = create_ai_interview(application)
+
+        if not created:
+            return Response(
+                {
+                    "success": True,
+                    "status_code": status.HTTP_200_OK,
+                    "message": "AI interview already exists.",
+                    "data": {
+                        "interview_id": interview.id,
+                        "status": interview.status,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        start_ai_interview_task.delay(interview.id)
+
+        return Response(
+            {
+                "success": True,
+                "status_code": status.HTTP_202_ACCEPTED,
+                "message": "AI interview processing started.",
+                "data": {
+                    "interview_id": interview.id,
+                    "status": interview.status,
+                },
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
 
 class MyApplicationsAPIView(ListAPIView):
 
