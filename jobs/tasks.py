@@ -1,5 +1,9 @@
+from accounts.models import CandidateProfile
+from accounts.services.resume_parser import extract_resume_text
 from celery import shared_task
 from django.core.exceptions import ObjectDoesNotExist
+from django.core.mail import send_mail
+from django.conf import settings
 
 @shared_task(
     bind=True,
@@ -38,4 +42,62 @@ def start_ai_interview_task(self, interview_id):
         "interview_id": interview.id,
         "status": interview.status,
         "message": "AI interview scheduled for background processing.",
+    }
+
+
+@shared_task
+def send_email_task(subject, message, recipient):
+    send_mail(
+        subject,
+        message,
+        settings.DEFAULT_FROM_EMAIL,
+        [recipient],
+    )
+
+    return {
+        "status": "SENT",
+        "recipient": recipient,
+        "subject": subject,
+    }
+
+
+@shared_task
+def parse_resume_task(candidate_profile_id):
+    try:
+        profile = CandidateProfile.objects.get(id=candidate_profile_id)
+    except CandidateProfile.DoesNotExist:
+        return {
+            "status": "FAILED",
+            "message": "Candidate profile not found.",
+        }
+
+    if not profile.resume:
+        return {
+            "status": "FAILED",
+            "message": "Candidate does not have a resume.",
+        }
+
+    try:
+        with profile.resume.open("rb") as resume_file:
+            text = extract_resume_text(resume_file)
+
+        return {
+            "status": "PARSED",
+            "candidate_profile_id": profile.id,
+            "characters": len(text),
+        }
+
+    except Exception as exc:
+        return {
+            "status": "FAILED",
+            "candidate_profile_id": profile.id,
+            "message": str(exc),
+        }
+
+
+@shared_task
+def daily_maintenance_task():
+    return {
+        "status": "SUCCESS",
+        "message": "Daily maintenance task executed.",
     }

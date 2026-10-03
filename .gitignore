@@ -8,3 +8,4 @@ media/
 staticfiles/
 *.zip
 .vscode/
+celerybeat-schedule*
