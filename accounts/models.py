@@ -92,6 +92,8 @@ class CandidateProfile(models.Model):
 
     is_deleted = models.BooleanField(default=False)
 
+    is_available_for_ai_interview = models.BooleanField(default=True)
+
     def __str__(self):
         return self.user.email
 
