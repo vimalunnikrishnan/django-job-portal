@@ -4,6 +4,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from accounts.models import User, CandidateProfile
+from jobs.services.ai_bridge.base import AIRateLimitError
+from jobs.services.ai_bridge.service import AIBridgeService
 
 
 class JobCreationAPITest(APITestCase):
@@ -196,3 +198,86 @@ class JobCreationAPITest(APITestCase):
             response.status_code,
             status.HTTP_403_FORBIDDEN,
         )
+
+
+class AIBridgeServiceTest(TestCase):
+
+    def test_generate_text_success(self):
+        bridge = AIBridgeService()
+
+        result = bridge.generate_text("Explain Django")
+
+        self.assertTrue(result["success"])
+        self.assertIn("Mock AI response", result["text"])
+
+
+    def test_provider_exception_returns_safe_failure(self):
+        provider = type(
+            "FailProvider",
+            (),
+            {
+                "generate_text": lambda self, prompt: (
+                    (_ for _ in ()).throw(
+                        ConnectionError("Test provider failure")
+                    )
+                )
+            },
+        )
+
+        bridge = AIBridgeService(
+            provider=provider(),
+            max_retries=3,
+        )
+
+        result = bridge.generate_text("Test retry")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(
+            result["error"],
+            "Test provider failure",
+        )
+
+
+    def test_rate_limit_returns_safe_failure(self):
+        provider = type(
+            "RateLimitProvider",
+            (),
+            {
+                "generate_text": lambda self, prompt: (
+                    (_ for _ in ()).throw(
+                        AIRateLimitError()
+                    )
+                )
+            },
+        )
+
+        bridge = AIBridgeService(
+            provider=provider(),
+            max_retries=3,
+        )
+
+        result = bridge.generate_text("Test rate limit")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(
+            result["error"],
+            "AI provider rate limit exceeded.",
+        )
+
+
+    def test_make_call_returns_call_id(self):
+        bridge = AIBridgeService()
+
+        result = bridge.make_call(
+            phone_number="+910000000000",
+            voice="female",
+            language="en",
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            result["call_id"],
+            "MOCK-CALL-001",
+        )
+        self.assertEqual(result["voice"], "female")
+        self.assertEqual(result["language"], "en")

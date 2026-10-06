@@ -4,6 +4,8 @@ from celery import shared_task
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.mail import send_mail
 from django.conf import settings
+from jobs.services.ai_bridge.service import AIBridgeService
+from jobs.models import CallLog
 
 @shared_task(
     bind=True,
@@ -38,10 +40,44 @@ def start_ai_interview_task(self, interview_id):
     interview.status = "SCHEDULED"
     interview.save(update_fields=["status", "updated_at"])
 
+    bridge = AIBridgeService()
+
+    call_result = bridge.make_call(
+        phone_number="+910000000000",
+        voice="female",
+        language="en",
+    )
+
+    if not call_result["success"]:
+        interview.status = "FAILED"
+        interview.save(update_fields=["status", "updated_at"])
+
+        return {
+            "interview_id": interview.id,
+            "status": "FAILED",
+            "message": call_result["error"],
+        }
+
+    interview.call_id = call_result["call_id"]
+    interview.save(update_fields=["call_id", "updated_at"])
+
+    CallLog.objects.create(
+        interview=interview,
+        event="STARTED",
+        reason="AI voice call queued successfully.",
+        details={
+            "provider": "mock",
+            "call_id": call_result["call_id"],
+            "voice": "female",
+            "language": "en",
+        },
+    )
+
     return {
         "interview_id": interview.id,
         "status": interview.status,
-        "message": "AI interview scheduled for background processing.",
+        "call_id": interview.call_id,
+        "message": "AI interview scheduled and voice call queued.",
     }
 
 
