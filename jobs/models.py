@@ -233,6 +233,172 @@ class AIInterview(models.Model):
         return f"AI Interview - {self.application}"
 
 
+class AIInterviewSession(models.Model):
+    STATUS_CHOICES = [
+        ("CREATED", "Created"),
+        ("IN_PROGRESS", "In Progress"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    ]
+
+    interview = models.ForeignKey(
+        AIInterview,
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+
+    session_id = models.CharField(
+        max_length=255,
+        unique=True,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="CREATED",
+    )
+
+    started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    ended_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    def __str__(self):
+        return f"Session {self.session_id} - {self.interview}"
+
+
+class AIQuestion(models.Model):
+    session = models.ForeignKey(
+        AIInterviewSession,
+        on_delete=models.CASCADE,
+        related_name="questions",
+    )
+
+    question = models.TextField()
+
+    sequence_number = models.PositiveIntegerField()
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = ["sequence_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "sequence_number"],
+                name="unique_session_question_sequence",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Question {self.sequence_number} - {self.session}"
+
+
+class AIAnswer(models.Model):
+    question = models.OneToOneField(
+        AIQuestion,
+        on_delete=models.CASCADE,
+        related_name="answer",
+    )
+
+    answer_text = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    transcript = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    transcript_data = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    answered_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    def __str__(self):
+        return f"Answer - Question {self.question.sequence_number}"
+    
+
+class CallLog(models.Model):
+    EVENT_CHOICES = [
+        ("TRIGGERED", "Triggered"),
+        ("SCHEDULED", "Scheduled"),
+        ("STARTED", "Started"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    ]
+
+    interview = models.ForeignKey(
+        AIInterview,
+        on_delete=models.CASCADE,
+        related_name="call_logs",
+    )
+
+    triggered_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ai_call_logs",
+    )
+
+    event = models.CharField(
+        max_length=20,
+        choices=EVENT_CHOICES,
+    )
+
+    reason = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
+    details = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    def __str__(self):
+        return f"{self.interview} - {self.event}"
+
+
 class AIInterviewQuestion(models.Model):
     interview = models.ForeignKey(
         AIInterview,
