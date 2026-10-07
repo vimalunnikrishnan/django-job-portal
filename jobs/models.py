@@ -258,6 +258,8 @@ class AIInterviewSession(models.Model):
         default="CREATED",
     )
 
+    current_question_index = models.PositiveIntegerField(default=0)
+
     started_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -292,6 +294,14 @@ class AIQuestion(models.Model):
         related_name="questions",
     )
 
+    question_template = models.ForeignKey(
+        "QuestionTemplate",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ai_questions",
+    )
+    
     question = models.TextField()
 
     sequence_number = models.PositiveIntegerField()
@@ -443,3 +453,68 @@ class AIInterviewQuestion(models.Model):
 
     def __str__(self):
         return f"Question {self.sequence_number} - {self.interview}"
+
+
+class QuestionTemplate(models.Model):
+    CATEGORY_CHOICES = [
+        ("INTRODUCTION", "Introduction"),
+        ("EXPERIENCE", "Experience"),
+        ("SKILLS", "Skills"),
+        ("AVAILABILITY", "Availability"),
+        ("SALARY", "Salary"),
+    ]
+
+    question = models.TextField()
+
+    follow_up_question = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="parent_questions",
+    )
+
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+    )
+    order = models.PositiveIntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.category} - {self.question}"
+
+
+class JobQuestionMapping(models.Model):
+    job = models.ForeignKey(
+        Job,
+        on_delete=models.CASCADE,
+        related_name="question_mappings",
+    )
+
+    question_template = models.ForeignKey(
+        QuestionTemplate,
+        on_delete=models.CASCADE,
+        related_name="job_mappings",
+    )
+
+    order = models.PositiveIntegerField(default=1)
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["job", "question_template"],
+                name="unique_job_question_template",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.job.title} - {self.question_template.question}"

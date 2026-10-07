@@ -1,4 +1,4 @@
-from jobs.models import Application, Job
+from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -6,6 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from accounts.models import User, CandidateProfile
 from jobs.services.ai_bridge.base import AIRateLimitError
 from jobs.services.ai_bridge.service import AIBridgeService
+from jobs.services.ai_question_engine.engine import AIQuestionEngine
 
 
 class JobCreationAPITest(APITestCase):
@@ -281,3 +282,145 @@ class AIBridgeServiceTest(TestCase):
         )
         self.assertEqual(result["voice"], "female")
         self.assertEqual(result["language"], "en")
+
+
+class AIQuestionEngineTest(TestCase):
+
+    def setUp(self):
+        self.candidate = User.objects.create_user(
+            username="enginecandidate",
+            email="enginecandidate@gmail.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.employer = User.objects.create_user(
+            username="engineemployer",
+            email="engineemployer@gmail.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Python Developer",
+            description="Python backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=25000,
+            max_salary=45000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+        )
+
+        self.interview = AIInterview.objects.create(
+            application=self.application,
+        )
+
+        self.session = AIInterviewSession.objects.create(
+            interview=self.interview,
+        )
+
+        self.templates = [
+            QuestionTemplate.objects.create(
+                question="Tell me about yourself.",
+                category="INTRODUCTION",
+                order=1,
+            ),
+            QuestionTemplate.objects.create(
+                question="How many years of software development experience do you have?",
+                category="EXPERIENCE",
+                order=2,
+            ),
+            QuestionTemplate.objects.create(
+                question="What are your strongest Python and Django skills?",
+                category="SKILLS",
+                order=3,
+            ),
+            QuestionTemplate.objects.create(
+                question="When are you available to join?",
+                category="AVAILABILITY",
+                order=4,
+            ),
+            QuestionTemplate.objects.create(
+                question="What are your salary expectations?",
+                category="SALARY",
+                order=5,
+            ),
+        ]
+
+        for index, template in enumerate(self.templates, start=1):
+            JobQuestionMapping.objects.create(
+                job=self.job,
+                question_template=template,
+                order=index,
+            )
+
+        self.engine = AIQuestionEngine(self.session)
+
+    def test_get_question_set(self):
+        questions = self.engine.get_question_set()
+
+        self.assertEqual(questions.count(), 5)
+        self.assertEqual(
+            questions.first().question_template.question,
+            "Tell me about yourself.",
+        )
+
+    def test_create_question(self):
+        question = self.engine.get_next_question()
+
+        self.assertEqual(
+            question.question,
+            "Tell me about yourself.",
+        )
+        self.assertEqual(question.sequence_number, 1)
+        self.assertEqual(
+            question.question_template,
+            self.templates[0],
+        )
+
+    def test_save_answer(self):
+        question = self.engine.get_next_question()
+
+        answer = self.engine.save_answer(
+            question,
+            "I am a Python developer.",
+        )
+
+        self.assertEqual(
+            answer.answer_text,
+            "I am a Python developer.",
+        )
+        self.assertEqual(answer.question, question)
+
+    def test_process_answer_moves_to_next_question(self):
+        question = self.engine.get_next_question()
+
+        result = self.engine.process_answer(
+            question,
+            "No",
+        )
+
+        self.assertEqual(result["action"], "NEXT")
+        self.assertEqual(
+            result["question"],
+            "How many years of software development experience do you have?",
+        )
+
+    def test_interview_completion(self):
+        self.session.current_question_index = 5
+        self.session.save(
+            update_fields=["current_question_index"]
+        )
+
+        self.assertTrue(
+            self.engine.is_interview_complete()
+        )
