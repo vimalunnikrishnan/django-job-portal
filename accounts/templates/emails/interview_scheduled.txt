@@ -1,0 +1,11 @@
+Hello {{ candidate_name }},
+
+Your interview for the position of {{ job_title }} has been scheduled.
+
+Interview Start: {{ scheduled_start }}
+Interview End: {{ scheduled_end }}
+
+Please be available at the scheduled time.
+
+Thank you,
+Job Portal Team

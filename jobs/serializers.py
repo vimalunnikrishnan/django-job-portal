@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Job, Application, SavedJob, ATSScore, AIAnswerEvaluation
+from .models import Job, Application, SavedJob, ATSScore, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule
 
 
 class JobSerializer(serializers.ModelSerializer):
@@ -89,6 +89,55 @@ class AIAnswerEvaluationSerializer(serializers.ModelSerializer):
         ]
 
         read_only_fields = fields
+
+
+class InterviewAvailabilitySerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = InterviewAvailability
+        fields = [
+            "id",
+            "employer",
+            "job",
+            "start_time",
+            "end_time",
+            "is_available",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "employer",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class InterviewScheduleSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = InterviewSchedule
+        fields = [
+            "id",
+            "interview",
+            "availability",
+            "scheduled_start",
+            "scheduled_end",
+            "status",
+            "confirmation_sent",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "scheduled_start",
+            "scheduled_end",
+            "status",
+            "confirmation_sent",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class RankedCandidateSerializer(serializers.Serializer):

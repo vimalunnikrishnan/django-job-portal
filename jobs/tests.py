@@ -1,5 +1,8 @@
-from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation
+from datetime import timedelta
+
+from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -555,4 +558,254 @@ class AIAnswerEvaluationAPITest(APITestCase):
         self.assertEqual(
             response.data["keyword_score"],
             100,
+        )
+
+
+class AIInterviewSchedulingAPITest(APITestCase):
+
+    def setUp(self):
+        self.candidate = User.objects.create_user(
+            username="schedulecandidate",
+            email="schedulecandidate@gmail.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.employer = User.objects.create_user(
+            username="scheduleemployer",
+            email="scheduleemployer@gmail.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.other_employer = User.objects.create_user(
+            username="other_schedule_employer",
+            email="other_schedule_employer@gmail.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Python Developer",
+            description="Python backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=25000,
+            max_salary=45000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+        )
+
+        self.interview = AIInterview.objects.create(
+            application=self.application,
+        )
+
+        self.start_time = timezone.now() + timedelta(days=1)
+        self.end_time = self.start_time + timedelta(minutes=30)
+
+        self.slot = InterviewAvailability.objects.create(
+            employer=self.employer,
+            job=self.job,
+            start_time=self.start_time,
+            end_time=self.end_time,
+        )
+
+        self.client.force_authenticate(
+            user=self.employer
+        )
+
+    def test_employer_can_create_availability_slot(self):
+        new_start = timezone.now() + timedelta(days=2)
+        new_end = new_start + timedelta(minutes=30)
+
+        response = self.client.post(
+            "/api/jobs/interview-availability/",
+            {
+                "job": self.job.id,
+                "start_time": new_start.isoformat(),
+                "end_time": new_end.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertTrue(
+            InterviewAvailability.objects.filter(
+                job=self.job,
+                start_time=new_start,
+            ).exists()
+        )
+
+    def test_employer_can_schedule_interview(self):
+        response = self.client.post(
+            "/api/jobs/interview-schedule/",
+            {
+                "interview_id": self.interview.id,
+                "availability_id": self.slot.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertTrue(
+            InterviewSchedule.objects.filter(
+                interview=self.interview,
+            ).exists()
+        )
+
+        self.slot.refresh_from_db()
+        self.interview.refresh_from_db()
+
+        self.assertFalse(self.slot.is_available)
+        self.assertEqual(
+            self.interview.status,
+            "SCHEDULED",
+        )
+
+    def test_conflicting_slot_is_rejected(self):
+        first_response = self.client.post(
+            "/api/jobs/interview-schedule/",
+            {
+                "interview_id": self.interview.id,
+                "availability_id": self.slot.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        second_interview = AIInterview.objects.create(
+            application=Application.objects.create(
+                candidate=User.objects.create_user(
+                    username="secondcandidate",
+                    email="secondcandidate@gmail.com",
+                    password="TestPassword123",
+                    role="CANDIDATE",
+                ),
+                job=self.job,
+            )
+        )
+
+        conflicting_slot = InterviewAvailability.objects.create(
+            employer=self.employer,
+            job=self.job,
+            start_time=self.start_time + timedelta(minutes=10),
+            end_time=self.end_time + timedelta(minutes=10),
+        )
+
+        response = self.client.post(
+            "/api/jobs/interview-schedule/",
+            {
+                "interview_id": second_interview.id,
+                "availability_id": conflicting_slot.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertIn(
+            "conflicts",
+            response.data["errors"]["detail"].lower(),
+        )
+
+    def test_employer_can_reschedule_interview(self):
+        schedule_response = self.client.post(
+            "/api/jobs/interview-schedule/",
+            {
+                "interview_id": self.interview.id,
+                "availability_id": self.slot.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            schedule_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        new_start = timezone.now() + timedelta(days=2)
+        new_end = new_start + timedelta(minutes=30)
+
+        new_slot = InterviewAvailability.objects.create(
+            employer=self.employer,
+            job=self.job,
+            start_time=new_start,
+            end_time=new_end,
+        )
+
+        schedule = InterviewSchedule.objects.get(
+            interview=self.interview,
+        )
+
+        response = self.client.post(
+            "/api/jobs/interview-reschedule/",
+            {
+                "schedule_id": schedule.id,
+                "availability_id": new_slot.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        schedule.refresh_from_db()
+        self.slot.refresh_from_db()
+        new_slot.refresh_from_db()
+
+        self.assertEqual(
+            schedule.status,
+            "RESCHEDULED",
+        )
+
+        self.assertEqual(
+            schedule.availability,
+            new_slot,
+        )
+
+        self.assertTrue(self.slot.is_available)
+        self.assertFalse(new_slot.is_available)
+
+    def test_other_employer_cannot_schedule_interview(self):
+        self.client.force_authenticate(
+            user=self.other_employer
+        )
+
+        response = self.client.post(
+            "/api/jobs/interview-schedule/",
+            {
+                "interview_id": self.interview.id,
+                "availability_id": self.slot.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
         )

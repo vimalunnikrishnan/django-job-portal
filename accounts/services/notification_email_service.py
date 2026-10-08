@@ -48,3 +48,23 @@ def send_application_rejected_email(application):
         },
         notification_type="REJECTED",
     )
+
+
+def send_interview_scheduled_email(schedule):
+    interview = schedule.interview
+    application = interview.application
+    candidate = application.candidate
+    job = application.job
+
+    return send_notification_email(
+        recipient_email=candidate.email,
+        subject="Interview Scheduled",
+        template_name="interview_scheduled",
+        context={
+            "candidate_name": candidate.get_full_name() or candidate.username,
+            "job_title": job.title,
+            "scheduled_start": schedule.scheduled_start.isoformat(),
+            "scheduled_end": schedule.scheduled_end.isoformat(),
+        },
+        notification_type="INTERVIEW",
+    )

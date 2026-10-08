@@ -546,3 +546,79 @@ class AIAnswerEvaluation(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class InterviewAvailability(models.Model):
+    employer = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="interview_availability",
+        limit_choices_to={"role": "EMPLOYER"},
+    )
+
+    job = models.ForeignKey(
+        Job,
+        on_delete=models.CASCADE,
+        related_name="interview_availability",
+    )
+
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
+
+    is_available = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["start_time"]
+
+    def __str__(self):
+        return (
+            f"{self.job.title} - "
+            f"{self.start_time} to {self.end_time}"
+        )
+
+
+class InterviewSchedule(models.Model):
+    STATUS_CHOICES = [
+        ("SCHEDULED", "Scheduled"),
+        ("CONFIRMED", "Confirmed"),
+        ("RESCHEDULED", "Rescheduled"),
+        ("CANCELLED", "Cancelled"),
+        ("COMPLETED", "Completed"),
+    ]
+
+    interview = models.OneToOneField(
+        AIInterview,
+        on_delete=models.CASCADE,
+        related_name="schedule",
+    )
+
+    availability = models.ForeignKey(
+        InterviewAvailability,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="schedules",
+    )
+
+    scheduled_start = models.DateTimeField()
+    scheduled_end = models.DateTimeField()
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="SCHEDULED",
+    )
+
+    confirmation_sent = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return (
+            f"{self.interview} - "
+            f"{self.scheduled_start}"
+        )

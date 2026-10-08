@@ -26,11 +26,12 @@ from accounts.services.ats_ranking import rank_candidates_for_job
 from accounts.services.auto_shortlisting import auto_process_application
 from jobs.services.ai_interview_service import create_ai_interview
 from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
+from jobs.services.ai_interview_scheduler.scheduler import AIInterviewScheduler
 from jobs.tasks import start_ai_interview_task
 
 from .filters import JobFilter
-from .models import Job, Application, SavedJob, ATSScore, AIInterview, AIQuestion, AIAnswerEvaluation
-from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer, AIAnswerEvaluationSerializer
+from .models import Job, Application, SavedJob, ATSScore, AIInterview, AIQuestion, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule
+from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer, AIAnswerEvaluationSerializer, InterviewAvailabilitySerializer, InterviewScheduleSerializer
 from .constants.application_constants import (
     APPLICATION_STATUS_TRANSITIONS,
 )
@@ -278,6 +279,192 @@ class ApplyJobAPIView(APIView):
             status_code=status.HTTP_201_CREATED,
         )
     
+
+class InterviewAvailabilityAPIView(APIView):
+    permission_classes = [IsEmployer]
+
+    def post(self, request):
+        serializer = InterviewAvailabilitySerializer(data=request.data)
+
+        if serializer.is_valid():
+            job = get_object_or_404(
+                Job,
+                pk=serializer.validated_data["job"].id,
+                employer=request.user,
+                is_active=True,
+            )
+
+            slot = serializer.save(
+                employer=request.user,
+            )
+
+            return success_response(
+                message="Interview availability slot created successfully.",
+                data=InterviewAvailabilitySerializer(slot).data,
+                status_code=status.HTTP_201_CREATED,
+            )
+
+        return Response(
+            {
+                "success": False,
+                "status_code": status.HTTP_400_BAD_REQUEST,
+                "errors": serializer.errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class InterviewScheduleAPIView(APIView):
+    permission_classes = [IsEmployer]
+
+    def post(self, request):
+        interview_id = request.data.get("interview_id")
+        availability_id = request.data.get("availability_id")
+
+        if not interview_id or not availability_id:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_400_BAD_REQUEST,
+                    "errors": {
+                        "detail": (
+                            "interview_id and availability_id are required."
+                        )
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        interview = get_object_or_404(
+            AIInterview.objects.select_related(
+                "application__job",
+            ),
+            pk=interview_id,
+        )
+
+        if interview.application.job.employer != request.user:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {
+                        "detail": "You do not have permission to schedule this interview."
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        availability = get_object_or_404(
+            InterviewAvailability,
+            pk=availability_id,
+            job=interview.application.job,
+        )
+
+        scheduler = AIInterviewScheduler()
+
+        result = scheduler.schedule_interview(
+            interview,
+            availability,
+        )
+
+        if not result["success"]:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_400_BAD_REQUEST,
+                    "errors": {
+                        "detail": result["error"],
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return success_response(
+            message="Interview scheduled successfully.",
+            data=InterviewScheduleSerializer(
+                result["schedule"]
+            ).data,
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
+class InterviewRescheduleAPIView(APIView):
+    permission_classes = [IsEmployer]
+
+    def post(self, request):
+        schedule_id = request.data.get("schedule_id")
+        availability_id = request.data.get("availability_id")
+
+        if not schedule_id or not availability_id:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_400_BAD_REQUEST,
+                    "errors": {
+                        "detail": (
+                            "schedule_id and availability_id are required."
+                        )
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        schedule = get_object_or_404(
+            InterviewSchedule.objects.select_related(
+                "interview__application__job",
+                "availability",
+            ),
+            pk=schedule_id,
+        )
+
+        if schedule.interview.application.job.employer != request.user:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {
+                        "detail": (
+                            "You do not have permission to reschedule "
+                            "this interview."
+                        )
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        new_slot = get_object_or_404(
+            InterviewAvailability,
+            pk=availability_id,
+            job=schedule.interview.application.job,
+        )
+
+        scheduler = AIInterviewScheduler()
+
+        result = scheduler.reschedule_interview(
+            schedule,
+            new_slot,
+        )
+
+        if not result["success"]:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_400_BAD_REQUEST,
+                    "errors": {
+                        "detail": result["error"],
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return success_response(
+            message="Interview rescheduled successfully.",
+            data=InterviewScheduleSerializer(
+                result["schedule"]
+            ).data,
+            status_code=status.HTTP_200_OK,
+        )
+
 
 class AIInterviewAPIView(APIView):
 

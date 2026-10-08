@@ -4,6 +4,7 @@ from .views import (
     ApplyJobAPIView,
     AIInterviewAPIView,
     FeaturedJobListAPIView,
+    InterviewAvailabilityAPIView,
     LatestJobListAPIView,
     JobCreateAPIView,
     JobDeleteAPIView,
@@ -23,6 +24,8 @@ from .views import (
     AutoProcessApplicationAPIView,
     AIAnswerEvaluationAPIView,
     AIAnswerScoreAPIView,
+    InterviewScheduleAPIView,
+    InterviewRescheduleAPIView,
 )
 
 urlpatterns = [
@@ -163,5 +166,23 @@ urlpatterns = [
         "ai-answers/<int:question_id>/score/",
         AIAnswerScoreAPIView.as_view(),
         name="ai-answer-score",
+    ),
+
+    path(
+        "interview-availability/",
+        InterviewAvailabilityAPIView.as_view(),
+        name="interview-availability",
+    ),
+
+    path(
+        "interview-schedule/",
+        InterviewScheduleAPIView.as_view(),
+        name="interview-schedule",
+    ),
+
+    path(
+        "interview-reschedule/",
+        InterviewRescheduleAPIView.as_view(),
+        name="interview-reschedule",
     ),
 ]
