@@ -25,11 +25,12 @@ from accounts.services.ats_scoring import calculate_and_save_ats_score
 from accounts.services.ats_ranking import rank_candidates_for_job
 from accounts.services.auto_shortlisting import auto_process_application
 from jobs.services.ai_interview_service import create_ai_interview
+from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
 from jobs.tasks import start_ai_interview_task
 
 from .filters import JobFilter
-from .models import Job, Application, SavedJob, ATSScore, AIInterview
-from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer
+from .models import Job, Application, SavedJob, ATSScore, AIInterview, AIQuestion, AIAnswerEvaluation
+from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer, AIAnswerEvaluationSerializer
 from .constants.application_constants import (
     APPLICATION_STATUS_TRANSITIONS,
 )
@@ -916,4 +917,110 @@ class JobCandidateRankingAPIView(APIView):
             message="Candidate ranking retrieved successfully.",
             data=serializer.data,
             status_code=status.HTTP_200_OK,
+        )
+
+
+class AIAnswerEvaluationAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, question_id):
+        question = get_object_or_404(
+            AIQuestion,
+            id=question_id,
+        )
+
+        answer_text = request.data.get("answer_text", "").strip()
+
+        if not answer_text:
+            return Response(
+                {
+                    "error": "answer_text is required."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        answer = getattr(question, "answer", None)
+
+        if answer is None:
+            from .models import AIAnswer
+
+            answer = AIAnswer.objects.create(
+                question=question,
+                answer_text=answer_text,
+            )
+        else:
+            answer.answer_text = answer_text
+            answer.save(update_fields=["answer_text", "updated_at"])
+
+        job = (
+            question.session.interview.application.job
+        )
+
+        expected_keywords = []
+
+        if job.skills:
+            expected_keywords = [
+                skill.strip()
+                for skill in job.skills.split(",")
+                if skill.strip()
+            ]
+
+        engine = AnswerScoringEngine()
+
+        result = engine.evaluate(
+            question=question.question,
+            answer=answer_text,
+            expected_keywords=expected_keywords,
+        )
+
+        evaluation, _ = AIAnswerEvaluation.objects.update_or_create(
+            answer=answer,
+            defaults={
+                "relevance_score": result["relevance_score"],
+                "completeness_score": result["completeness_score"],
+                "keyword_score": result["keyword_score"],
+                "overall_score": result["overall_score"],
+                "confidence": result["confidence"],
+                "ai_annotations": result["ai_annotations"],
+            },
+        )
+
+        return Response(
+            AIAnswerEvaluationSerializer(evaluation).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class AIAnswerScoreAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, question_id):
+        question = get_object_or_404(
+            AIQuestion,
+            id=question_id,
+        )
+
+        answer = getattr(question, "answer", None)
+
+        if answer is None:
+            return Response(
+                {
+                    "error": "No answer found for this question."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        evaluation = getattr(answer, "evaluation", None)
+
+        if evaluation is None:
+            return Response(
+                {
+                    "error": "Answer has not been evaluated yet."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            AIAnswerEvaluationSerializer(evaluation).data,
+            status=status.HTTP_200_OK,
         )

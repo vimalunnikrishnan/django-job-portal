@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Job, Application, SavedJob, ATSScore
+from .models import Job, Application, SavedJob, ATSScore, AIAnswerEvaluation
 
 
 class JobSerializer(serializers.ModelSerializer):
@@ -63,6 +63,27 @@ class ATSScoreSerializer(serializers.ModelSerializer):
             "experience_score",
             "education_score",
             "match_percentage",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = fields
+
+
+class AIAnswerEvaluationSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = AIAnswerEvaluation
+        fields = [
+            "id",
+            "answer",
+            "relevance_score",
+            "completeness_score",
+            "keyword_score",
+            "overall_score",
+            "confidence",
+            "ai_annotations",
+            "feedback",
             "created_at",
             "updated_at",
         ]

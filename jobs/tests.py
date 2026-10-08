@@ -1,4 +1,4 @@
-from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping
+from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -7,6 +7,7 @@ from accounts.models import User, CandidateProfile
 from jobs.services.ai_bridge.base import AIRateLimitError
 from jobs.services.ai_bridge.service import AIBridgeService
 from jobs.services.ai_question_engine.engine import AIQuestionEngine
+from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
 
 
 class JobCreationAPITest(APITestCase):
@@ -423,4 +424,135 @@ class AIQuestionEngineTest(TestCase):
 
         self.assertTrue(
             self.engine.is_interview_complete()
+        )
+
+
+class AIAnswerEvaluationAPITest(APITestCase):
+
+    def setUp(self):
+        self.candidate = User.objects.create_user(
+            username="evaluationcandidate",
+            email="evaluationcandidate@gmail.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.employer = User.objects.create_user(
+            username="evaluationemployer",
+            email="evaluationemployer@gmail.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Python Developer",
+            description="Python backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=25000,
+            max_salary=45000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+        )
+
+        self.interview = AIInterview.objects.create(
+            application=self.application,
+        )
+
+        self.session = AIInterviewSession.objects.create(
+            interview=self.interview,
+        )
+
+        self.question = AIQuestion.objects.create(
+            session=self.session,
+            question="What are your strongest Python and Django skills?",
+            sequence_number=1,
+        )
+
+        self.client.force_authenticate(
+            user=self.candidate
+        )
+
+    def test_submit_answer_and_create_evaluation(self):
+        response = self.client.post(
+            f"/api/jobs/ai-answers/{self.question.id}/evaluate/",
+            {
+                "answer_text": (
+                    "I have strong Python and Django skills. "
+                    "I have built backend web applications."
+                )
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertTrue(
+            AIAnswerEvaluation.objects.filter(
+                answer__question=self.question
+            ).exists()
+        )
+
+        evaluation = AIAnswerEvaluation.objects.get(
+            answer__question=self.question
+        )
+
+        self.assertGreaterEqual(
+            evaluation.overall_score,
+            0,
+        )
+
+        self.assertLessEqual(
+            evaluation.overall_score,
+            100,
+        )
+
+    def test_retrieve_evaluation_score(self):
+        answer = AIAnswer.objects.create(
+            question=self.question,
+            answer_text=(
+                "I have strong Python and Django skills."
+            ),
+        )
+
+        AIAnswerEvaluation.objects.create(
+            answer=answer,
+            relevance_score=80,
+            completeness_score=75,
+            keyword_score=100,
+            overall_score=84.5,
+            confidence=77.5,
+            ai_annotations={
+                "evaluation_method": "rule_based",
+            },
+        )
+
+        response = self.client.get(
+            f"/api/jobs/ai-answers/{self.question.id}/score/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data["overall_score"],
+            84.5,
+        )
+
+        self.assertEqual(
+            response.data["keyword_score"],
+            100,
         )

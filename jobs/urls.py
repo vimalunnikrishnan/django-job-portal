@@ -21,6 +21,8 @@ from .views import (
     JobMatchPercentageAPIView,
     JobCandidateRankingAPIView,
     AutoProcessApplicationAPIView,
+    AIAnswerEvaluationAPIView,
+    AIAnswerScoreAPIView,
 )
 
 urlpatterns = [
@@ -149,5 +151,17 @@ urlpatterns = [
         "applications/<int:pk>/ai-interview/",
         AIInterviewAPIView.as_view(),
         name="application-ai-interview",
+    ),
+
+    path(
+        "ai-answers/<int:question_id>/evaluate/",
+        AIAnswerEvaluationAPIView.as_view(),
+        name="ai-answer-evaluate",
+    ),
+
+    path(
+        "ai-answers/<int:question_id>/score/",
+        AIAnswerScoreAPIView.as_view(),
+        name="ai-answer-score",
     ),
 ]

@@ -518,3 +518,31 @@ class JobQuestionMapping(models.Model):
 
     def __str__(self):
         return f"{self.job.title} - {self.question_template.question}"
+
+
+class AIAnswerEvaluation(models.Model):
+    answer = models.OneToOneField(
+        AIAnswer,
+        on_delete=models.CASCADE,
+        related_name="evaluation",
+    )
+
+    relevance_score = models.FloatField(default=0)
+    completeness_score = models.FloatField(default=0)
+    keyword_score = models.FloatField(default=0)
+    overall_score = models.FloatField(default=0)
+
+    confidence = models.FloatField(default=0)
+
+    ai_annotations = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    feedback = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
