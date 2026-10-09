@@ -1,6 +1,7 @@
 from datetime import timedelta
 
-from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule
+from unittest.mock import patch
+from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
@@ -11,7 +12,7 @@ from jobs.services.ai_bridge.base import AIRateLimitError
 from jobs.services.ai_bridge.service import AIBridgeService
 from jobs.services.ai_question_engine.engine import AIQuestionEngine
 from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
-
+from jobs.services.interview_reminder_service import InterviewReminderService
 
 class JobCreationAPITest(APITestCase):
 
@@ -809,3 +810,158 @@ class AIInterviewSchedulingAPITest(APITestCase):
             response.status_code,
             status.HTTP_403_FORBIDDEN,
         )
+
+
+
+class InterviewReminderServiceTest(TestCase):
+    def setUp(self):
+        self.employer = User.objects.create_user(
+            username="reminder_employer",
+            email="reminder_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.candidate = User.objects.create_user(
+            username="reminder_candidate",
+            email="reminder_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Python Developer",
+            description="Backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=25000,
+            max_salary=45000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+            is_featured=False,
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+        )
+
+        self.interview = AIInterview.objects.create(
+            application=self.application,
+            status="SCHEDULED",
+        )
+
+        self.schedule = InterviewSchedule.objects.create(
+            interview=self.interview,
+            scheduled_start=timezone.now() + timedelta(hours=24),
+            scheduled_end=timezone.now()
+            + timedelta(hours=24, minutes=30),
+            status="SCHEDULED",
+        )
+
+    def test_detects_24_hour_reminder_window(self):
+        now = timezone.now()
+        self.schedule.scheduled_start = now + timedelta(hours=24)
+        self.schedule.save(update_fields=["scheduled_start"])
+
+        stages = InterviewReminderService.get_due_stages(
+            self.schedule,
+            now=now,
+        )
+
+        self.assertIn("24_HOURS", stages)
+
+    def test_detects_one_hour_reminder_window(self):
+        now = timezone.now()
+        self.schedule.scheduled_start = now + timedelta(hours=1)
+        self.schedule.save(update_fields=["scheduled_start"])
+
+        stages = InterviewReminderService.get_due_stages(
+            self.schedule,
+            now=now,
+        )
+
+        self.assertIn("1_HOUR", stages)
+
+    def test_detects_15_minute_reminder_window(self):
+        now = timezone.now()
+        self.schedule.scheduled_start = now + timedelta(minutes=15)
+        self.schedule.save(update_fields=["scheduled_start"])
+
+        stages = InterviewReminderService.get_due_stages(
+            self.schedule,
+            now=now,
+        )
+
+        self.assertIn("15_MINUTES", stages)
+
+    def test_get_or_create_prevents_duplicate_reminders(self):
+        first, created_first = (
+            InterviewReminderService.get_or_create_reminder(
+                self.schedule,
+                "24_HOURS",
+            )
+        )
+        second, created_second = (
+            InterviewReminderService.get_or_create_reminder(
+                self.schedule,
+                "24_HOURS",
+            )
+        )
+
+        self.assertTrue(created_first)
+        self.assertFalse(created_second)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(
+            InterviewReminder.objects.filter(
+                schedule=self.schedule,
+                stage="24_HOURS",
+            ).count(),
+            1,
+        )
+
+
+    def test_failed_reminder_is_retryable_after_five_minutes(self):
+        reminder = InterviewReminder.objects.create(
+            schedule=self.schedule,
+            stage="24_HOURS",
+            status="FAILED",
+            attempt_count=1,
+        )
+
+        InterviewReminder.objects.filter(pk=reminder.pk).update(
+            updated_at=timezone.now() - timedelta(minutes=6)
+        )
+
+        retryable_ids = list(
+            InterviewReminderService.get_retryable_reminders().values_list(
+                "id",
+                flat=True,
+            )
+        )
+
+        self.assertIn(reminder.id, retryable_ids)
+
+    def test_reminder_with_three_attempts_is_not_retryable(self):
+        reminder = InterviewReminder.objects.create(
+            schedule=self.schedule,
+            stage="24_HOURS",
+            status="FAILED",
+            attempt_count=3,
+        )
+
+        InterviewReminder.objects.filter(pk=reminder.pk).update(
+            updated_at=timezone.now() - timedelta(minutes=6)
+        )
+
+        retryable_ids = list(
+            InterviewReminderService.get_retryable_reminders().values_list(
+                "id",
+                flat=True,
+            )
+        )
+
+        self.assertNotIn(reminder.id, retryable_ids)

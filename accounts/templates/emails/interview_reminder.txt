@@ -1,0 +1,13 @@
+
+Hello {{ candidate_name }},
+
+This is a reminder that your interview for {{ job_title }} is scheduled soon.
+
+Reminder: {{ reminder_stage }}
+Interview starts: {{ scheduled_start }}
+Interview ends: {{ scheduled_end }}
+
+Please be ready before the scheduled start time.
+
+Best regards,
+Recruitment Team

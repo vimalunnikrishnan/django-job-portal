@@ -30,7 +30,7 @@ from jobs.services.ai_interview_scheduler.scheduler import AIInterviewScheduler
 from jobs.tasks import start_ai_interview_task
 
 from .filters import JobFilter
-from .models import Job, Application, SavedJob, ATSScore, AIInterview, AIQuestion, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule
+from .models import Job, Application, SavedJob, ATSScore, AIInterview, AIQuestion, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
 from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer, AIAnswerEvaluationSerializer, InterviewAvailabilitySerializer, InterviewScheduleSerializer
 from .constants.application_constants import (
     APPLICATION_STATUS_TRANSITIONS,
@@ -1210,4 +1210,41 @@ class AIAnswerScoreAPIView(APIView):
         return Response(
             AIAnswerEvaluationSerializer(evaluation).data,
             status=status.HTTP_200_OK,
+        )
+
+
+class InterviewReminderListAPIView(APIView):
+    permission_classes = [IsEmployer]
+
+    def get(self, request):
+        reminders = InterviewReminder.objects.filter(
+            schedule__interview__application__job__employer=request.user,
+        ).select_related(
+            "schedule",
+            "schedule__interview",
+            "schedule__interview__application",
+            "schedule__interview__application__job",
+        ).order_by("-created_at")
+
+        data = [
+            {
+                "id": reminder.id,
+                "schedule_id": reminder.schedule_id,
+                "job_title": (
+                    reminder.schedule.interview.application.job.title
+                ),
+                "stage": reminder.stage,
+                "status": reminder.status,
+                "attempt_count": reminder.attempt_count,
+                "error_message": reminder.error_message,
+                "sent_at": reminder.sent_at,
+                "created_at": reminder.created_at,
+            }
+            for reminder in reminders
+        ]
+
+        return success_response(
+            message="Interview reminder records retrieved successfully.",
+            data=data,
+            status_code=status.HTTP_200_OK,
         )

@@ -265,9 +265,14 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = False
 
 
+
 CELERY_BEAT_SCHEDULE = {
     "daily-maintenance": {
         "task": "jobs.tasks.daily_maintenance_task",
         "schedule": crontab(hour=14, minute=0),
+    },
+    "interview-reminder-scan": {
+        "task": "jobs.tasks.send_due_interview_reminders_task",
+        "schedule": crontab(minute="*/5"),
     },
 }

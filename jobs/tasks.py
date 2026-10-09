@@ -1,4 +1,4 @@
-from accounts.models import CandidateProfile
+﻿from accounts.models import CandidateProfile
 from accounts.services.resume_parser import extract_resume_text
 from celery import shared_task
 from django.core.exceptions import ObjectDoesNotExist
@@ -136,4 +136,73 @@ def daily_maintenance_task():
     return {
         "status": "SUCCESS",
         "message": "Daily maintenance task executed.",
+    }
+
+
+
+@shared_task
+def send_due_interview_reminders_task():
+    from jobs.services.interview_reminder_service import (
+        InterviewReminderService,
+    )
+
+    sent = 0
+    failed = 0
+
+    processed_reminder_ids = set()
+
+    schedules = InterviewReminderService.get_due_schedules()
+
+    for schedule in schedules:
+        stages = InterviewReminderService.get_due_stages(schedule)
+
+
+        for stage in stages:
+            reminder, _ = InterviewReminderService.get_or_create_reminder(
+                schedule,
+                stage,
+            )
+
+            if reminder.id in processed_reminder_ids:
+                continue
+
+            processed_reminder_ids.add(reminder.id)
+
+            result = InterviewReminderService.send_reminder(
+                schedule=schedule,
+                stage=stage,
+            )
+
+            if result["status"] == "SENT":
+                sent += 1
+            elif result["status"] == "FAILED":
+                failed += 1
+
+
+    retryable_reminders = (
+        InterviewReminderService.get_retryable_reminders()
+    )
+
+
+    for reminder in retryable_reminders:
+        if reminder.id in processed_reminder_ids:
+            continue
+
+        processed_reminder_ids.add(reminder.id)
+
+        result = InterviewReminderService.send_reminder(
+            schedule=reminder.schedule,
+            stage=reminder.stage,
+        )
+
+        if result["status"] == "SENT":
+            sent += 1
+        elif result["status"] == "FAILED":
+            failed += 1
+
+    return {
+        "status": "SUCCESS",
+        "sent": sent,
+        "failed": failed,
+        "message": "Interview reminder scan completed.",
     }

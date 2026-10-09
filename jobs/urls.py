@@ -26,6 +26,7 @@ from .views import (
     AIAnswerScoreAPIView,
     InterviewScheduleAPIView,
     InterviewRescheduleAPIView,
+    InterviewReminderListAPIView,
 )
 
 urlpatterns = [
@@ -184,5 +185,12 @@ urlpatterns = [
         "interview-reschedule/",
         InterviewRescheduleAPIView.as_view(),
         name="interview-reschedule",
+    ),
+
+
+    path(
+        "interview-reminders/",
+        InterviewReminderListAPIView.as_view(),
+        name="interview-reminders",
     ),
 ]
