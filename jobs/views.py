@@ -27,6 +27,7 @@ from accounts.services.auto_shortlisting import auto_process_application
 from jobs.services.ai_interview_service import create_ai_interview
 from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
 from jobs.services.ai_interview_scheduler.scheduler import AIInterviewScheduler
+from jobs.services.reports.candidate_report_service import CandidateReportService
 from jobs.tasks import start_ai_interview_task
 
 from .filters import JobFilter
@@ -1209,6 +1210,35 @@ class AIAnswerScoreAPIView(APIView):
 
         return Response(
             AIAnswerEvaluationSerializer(evaluation).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class CandidateReportAPIView(APIView):
+    permission_classes = [IsEmployer]
+
+    def get(self, request, application_id):
+        report = CandidateReportService.generate_report(
+            application_id=application_id,
+            employer=request.user,
+        )
+
+        if report is None:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Application not found.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Candidate report generated successfully.",
+                "data": report,
+            },
             status=status.HTTP_200_OK,
         )
 

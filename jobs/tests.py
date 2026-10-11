@@ -1,4 +1,4 @@
-from datetime import timedelta
+﻿from datetime import timedelta
 
 from unittest.mock import patch
 from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
@@ -965,3 +965,177 @@ class InterviewReminderServiceTest(TestCase):
         )
 
         self.assertNotIn(reminder.id, retryable_ids)
+
+
+
+from jobs.services.reports.candidate_report_service import CandidateReportService
+
+
+class CandidateReportServiceTest(TestCase):
+    def setUp(self):
+        self.employer = User.objects.create_user(
+            username="report_employer",
+            email="report_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.candidate = User.objects.create_user(
+            username="report_candidate",
+            email="report_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.candidate_profile = CandidateProfile.objects.get(
+            user=self.candidate
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Python Developer",
+            description="Develop backend applications",
+            skills="Python, Django, REST API",
+            experience=1,
+            min_salary=20000,
+            max_salary=40000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+        )
+
+    def test_report_contains_candidate_job_and_summary(self):
+        report = CandidateReportService.generate_report(
+            application_id=self.application.id,
+            employer=self.employer,
+        )
+
+        self.assertIsNotNone(report)
+        self.assertEqual(report["candidate"]["email"], self.candidate.email)
+        self.assertEqual(report["job"]["title"], self.job.title)
+        self.assertIn("ats_evaluation", report)
+        self.assertIn("interview_evaluation", report)
+        self.assertIn("summary", report)
+
+    def test_report_is_not_generated_for_another_employer(self):
+        another_employer = User.objects.create_user(
+            username="other_report_employer",
+            email="other_report_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        report = CandidateReportService.generate_report(
+            application_id=self.application.id,
+            employer=another_employer,
+        )
+
+        self.assertIsNone(report)
+
+    def test_report_is_not_generated_for_missing_application(self):
+        report = CandidateReportService.generate_report(
+            application_id=999999,
+            employer=self.employer,
+        )
+
+        self.assertIsNone(report)
+
+
+
+from rest_framework.test import APITestCase
+from rest_framework import status
+
+
+class CandidateReportAPITest(APITestCase):
+    def setUp(self):
+        self.employer = User.objects.create_user(
+            username="report_api_employer",
+            email="report_api_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.candidate = User.objects.create_user(
+            username="report_api_candidate",
+            email="report_api_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Django Developer",
+            description="Backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=20000,
+            max_salary=40000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+        )
+
+        self.url = (
+            f"/api/jobs/employer/applications/"
+            f"{self.application.id}/report/"
+        )
+
+    def test_unauthenticated_user_cannot_access_report(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_candidate_cannot_access_report(self):
+        self.client.force_authenticate(user=self.candidate)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_employer_can_access_owned_application_report(self):
+        self.client.force_authenticate(user=self.employer)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertTrue(response.data["success"])
+        self.assertEqual(
+            response.data["data"]["application"]["id"],
+            self.application.id,
+        )
+
+    def test_employer_cannot_access_another_employers_report(self):
+        another_employer = User.objects.create_user(
+            username="another_report_api_employer",
+            email="another_report_api_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.client.force_authenticate(user=another_employer)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
