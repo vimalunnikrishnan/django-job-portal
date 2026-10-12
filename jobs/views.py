@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta
+from django.utils import timezone
 from django.core.cache import cache
-from django.db.models import Q
+from django.db.models import Count, Q
+from django.db.models.functions import TruncDate
 from django.shortcuts import get_object_or_404
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -598,6 +601,7 @@ class EmployerApplicationsAPIView(ListAPIView):
         )
 
 
+
 class EmployerAnalyticsAPIView(APIView):
 
     permission_classes = [IsEmployer]
@@ -606,23 +610,34 @@ class EmployerAnalyticsAPIView(APIView):
 
         employer = request.user
 
-        total_jobs = Job.objects.filter(
-            employer=employer,
-        ).count()
+        cache_key = f"employer-analytics:{employer.id}"
 
-        active_jobs = Job.objects.filter(
-            employer=employer,
-            is_active=True,
-        ).count()
+        cached_data = cache.get(cache_key)
 
-        closed_jobs = Job.objects.filter(
+        if cached_data is not None:
+            return success_response(
+                message="Employer analytics fetched successfully.",
+                data=cached_data,
+                status_code=status.HTTP_200_OK,
+            )
+
+        jobs = Job.objects.filter(
             employer=employer,
-            status="CLOSED",
-        ).count()
+        )
 
         applications = Application.objects.filter(
             job__employer=employer,
         )
+
+        total_jobs = jobs.count()
+
+        active_jobs = jobs.filter(
+            is_active=True,
+        ).count()
+
+        closed_jobs = jobs.filter(
+            status="CLOSED",
+        ).count()
 
         total_applications = applications.count()
 
@@ -646,28 +661,154 @@ class EmployerAnalyticsAPIView(APIView):
             status="REJECTED",
         ).count()
 
-        shortlist_ratio = 0
+        def conversion_ratio(numerator, denominator):
+            if denominator == 0:
+                return 0
 
-        if total_applications > 0:
-            shortlist_ratio = round(
-                (shortlisted / total_applications) * 100,
+            return round(
+                (numerator / denominator) * 100,
                 2,
             )
 
-        return success_response(
-            message="Employer analytics fetched successfully.",
-            data={
-                "total_jobs": total_jobs,
-                "active_jobs": active_jobs,
-                "closed_jobs": closed_jobs,
-                "total_applications": total_applications,
+        shortlist_ratio = conversion_ratio(
+            shortlisted,
+            total_applications,
+        )
+
+        interview_ratio = conversion_ratio(
+            interview,
+            shortlisted,
+        )
+
+        selection_ratio = conversion_ratio(
+            selected,
+            interview,
+        )
+
+        job_performance = list(
+            jobs.order_by("id").annotate(
+                total_applications=Count("applications"),
+                shortlisted=Count(
+                    "applications",
+                    filter=Q(
+                        applications__status="SHORTLISTED",
+                    ),
+                ),
+                interview=Count(
+                    "applications",
+                    filter=Q(
+                        applications__status="INTERVIEW",
+                    ),
+                ),
+                selected=Count(
+                    "applications",
+                    filter=Q(
+                        applications__status="SELECTED",
+                    ),
+                ),
+                rejected=Count(
+                    "applications",
+                    filter=Q(
+                        applications__status="REJECTED",
+                    ),
+                ),
+            ).values(
+                "id",
+                "title",
+                "job_type",
+                "status",
+                "total_applications",
+                "shortlisted",
+                "interview",
+                "selected",
+                "rejected",
+            )
+        )
+
+        job_performance = [
+            {
+                "job_id": job["id"],
+                "job_title": job["title"],
+                "job_type": job["job_type"],
+                "status": job["status"],
+                "total_applications": job["total_applications"],
+                "shortlisted": job["shortlisted"],
+                "interview": job["interview"],
+                "selected": job["selected"],
+                "rejected": job["rejected"],
+            }
+            for job in job_performance
+        ]
+
+        today = timezone.localdate()
+        start_date = today - timedelta(days=6)
+
+        daily_counts = applications.filter(
+            applied_at__date__gte=start_date,
+            applied_at__date__lte=today,
+        ).annotate(
+            application_date=TruncDate("applied_at"),
+        ).values(
+            "application_date",
+        ).annotate(
+            total=Count("id"),
+        ).order_by(
+            "application_date",
+        )
+
+        counts_by_date = {
+            item["application_date"]: item["total"]
+            for item in daily_counts
+        }
+
+        daily_applications = [
+            {
+                "date": (
+                    start_date + timedelta(days=day_offset)
+                ).isoformat(),
+                "applications": counts_by_date.get(
+                    start_date + timedelta(days=day_offset),
+                    0,
+                ),
+            }
+            for day_offset in range(7)
+        ]
+
+        data = {
+            "total_jobs": total_jobs,
+            "active_jobs": active_jobs,
+            "closed_jobs": closed_jobs,
+            "total_applications": total_applications,
+            "applied": applied,
+            "shortlisted": shortlisted,
+            "interview": interview,
+            "selected": selected,
+            "rejected": rejected,
+            "shortlist_ratio": shortlist_ratio,
+            "funnel": {
                 "applied": applied,
                 "shortlisted": shortlisted,
-                "interview": interview,
+                "interviewed": interview,
                 "selected": selected,
-                "rejected": rejected,
-                "shortlist_ratio": shortlist_ratio,
             },
+            "conversion_ratios": {
+                "application_to_shortlist": shortlist_ratio,
+                "shortlist_to_interview": interview_ratio,
+                "interview_to_selection": selection_ratio,
+            },
+            "job_performance": job_performance,
+            "daily_applications": daily_applications,
+        }
+
+        cache.set(
+            cache_key,
+            data,
+            timeout=60,
+        )
+
+        return success_response(
+            message="Employer analytics fetched successfully.",
+            data=data,
             status_code=status.HTTP_200_OK,
         )
 
@@ -723,6 +864,10 @@ class ApplicationStatusUpdateAPIView(APIView):
                 )
 
             serializer.save()
+
+            cache.delete(
+                f"employer-analytics:{application.job.employer_id}"
+            )
 
             return success_response(
                 message="Application status updated successfully.",

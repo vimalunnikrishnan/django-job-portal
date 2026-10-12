@@ -1,6 +1,9 @@
 ﻿from datetime import timedelta
 
 from unittest.mock import patch
+
+from django.core.cache import cache
+from django.core.serializers import python
 from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
 from django.test import TestCase
 from django.utils import timezone
@@ -1138,4 +1141,118 @@ class CandidateReportAPITest(APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_404_NOT_FOUND,
+        )
+
+
+class EmployerAnalyticsAPITest(APITestCase):
+
+    def setUp(self):
+        cache.clear()  # Clear old analytics data before each test
+
+        self.employer = User.objects.create_user(
+            username="analytics_employer",
+            email="analytics_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        # Keep the rest of your existing setUp() code unchanged.
+
+        self.candidate = User.objects.create_user(
+            username="analytics_candidate",
+            email="analytics_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Django Developer",
+            description="Backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=20000,
+            max_salary=40000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+        )
+
+        self.url = "/api/jobs/employer/analytics/"
+
+    def test_unauthenticated_user_cannot_access_analytics(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_candidate_cannot_access_analytics(self):
+        self.client.force_authenticate(user=self.candidate)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_employer_can_access_analytics(self):
+        self.client.force_authenticate(user=self.employer)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertTrue(response.data["success"])
+        self.assertEqual(
+            response.data["data"]["total_jobs"],
+            1,
+        )
+        self.assertEqual(
+            response.data["data"]["total_applications"],
+            0,
+        )
+
+    def test_analytics_includes_funnel_and_performance_data(self):
+        self.client.force_authenticate(user=self.employer)
+
+        Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+            status="SHORTLISTED",
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        data = response.data["data"]
+
+        self.assertEqual(
+            data["funnel"]["shortlisted"],
+            1,
+        )
+        self.assertEqual(
+            data["conversion_ratios"]["application_to_shortlist"],
+            100.0,
+        )
+        self.assertEqual(
+            len(data["job_performance"]),
+            1,
+        )
+        self.assertEqual(
+            data["job_performance"][0]["total_applications"],
+            1,
+        )
+        self.assertEqual(
+            len(data["daily_applications"]),
+            7,
         )
