@@ -223,3 +223,67 @@ class AdminActionLog(models.Model):
 
     def __str__(self):
         return f"{self.admin.email} - {self.action}"
+
+
+
+class AuditTrail(models.Model):
+
+    ACTION_CATEGORIES = [
+        ("USER", "User Action"),
+        ("ADMIN", "Admin Action"),
+        ("AI", "AI Action"),
+        ("SECURITY", "Security Event"),
+        ("SYSTEM", "System Event"),
+    ]
+
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_trails",
+    )
+
+    category = models.CharField(
+        max_length=20,
+        choices=ACTION_CATEGORIES,
+        db_index=True,
+    )
+
+    action = models.CharField(
+        max_length=100,
+        db_index=True,
+    )
+
+    description = models.TextField(blank=True)
+
+    target_type = models.CharField(
+        max_length=100,
+        blank=True,
+    )
+
+    target_id = models.CharField(
+        max_length=100,
+        blank=True,
+    )
+
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.category} - {self.action} - {self.created_at}"

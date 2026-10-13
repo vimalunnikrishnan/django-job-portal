@@ -6,6 +6,8 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework.exceptions import AuthenticationFailed
 
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -14,6 +16,7 @@ from .models import (
     EmployerProfile,
     CandidateProfile,
     AdminActionLog,
+    AuditTrail,
 )
 
 from .services.resume_parser import extract_resume_text
@@ -35,6 +38,45 @@ from .serializers import (
 )
 
 from jobs.models import Job, Application
+
+import logging
+
+logger = logging.getLogger("accounts")
+ai_logger = logging.getLogger("ai_events")
+
+def record_security_event(request, action, description):
+    user = request.user
+    actor = user if user.is_authenticated else None
+
+    AuditTrail.objects.create(
+        actor=actor,
+        category="SECURITY",
+        action=action,
+        description=description,
+        metadata={
+            "path": request.path,
+            "method": request.method,
+        },
+    )
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    def post(self, request, *args, **kwargs):
+        try:
+            response = super().post(request, *args, **kwargs)
+            return response
+        except AuthenticationFailed:
+            logger.warning(
+                "Failed login attempt from IP=%s",
+                request.META.get("REMOTE_ADDR", "unknown"),
+            )
+            record_security_event(
+                request,
+                action="LOGIN_FAILED",
+                description="Login failed due to invalid credentials.",
+            )
+            raise
+
 
 class SignupAPIView(APIView):
 
@@ -201,8 +243,24 @@ class ResumeUploadAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        except Exception as e:
+        except Exception:
+            logger.exception(
+                "Resume processing failed for user_id=%s",
+                request.user.id,
+            )
 
+            AuditTrail.objects.create(
+                actor=request.user,
+                category="AI",
+                action="RESUME_PROCESSING_FAILED",
+                description="Resume processing failed.",
+                target_type="CandidateProfile",
+                target_id=str(profile.id),
+                metadata={
+                    "user_id": request.user.id,
+                    "error_type": "resume_processing_error",
+                },
+            )
             return Response(
                 {
                     "success": False,
@@ -216,6 +274,23 @@ class ResumeUploadAPIView(APIView):
             )
 
         parsed_resume = parse_resume(extracted_text)
+
+        ai_logger.info(
+            "Resume analyzed successfully for user_id=%s",
+            request.user.id,
+        )
+
+        AuditTrail.objects.create(
+            actor=request.user,
+            category="AI",
+            action="RESUME_ANALYZED",
+            description="Resume text extracted and analyzed.",
+            target_type="CandidateProfile",
+            target_id=str(profile.id),
+            metadata={
+                "user_id": request.user.id,
+            },
+        )
 
         return success_response(
             message="Resume uploaded and analyzed successfully.",
@@ -292,6 +367,18 @@ class EmployerApprovalAPIView(APIView):
             reason="Employer approved by admin.",
         )
 
+        AuditTrail.objects.create(
+            actor=request.user,
+            category="ADMIN",
+            action="EMPLOYER_APPROVED",
+            description="Admin approved an employer.",
+            target_type="EmployerProfile",
+            target_id=str(employer.id),
+            metadata={
+                "target_user_id": employer.user_id,
+            },
+        )
+
         return success_response(
             message="Employer approved successfully.",
             data={
@@ -362,6 +449,18 @@ class UserBlockAPIView(APIView):
             reason="User blocked by admin.",
         )
 
+        AuditTrail.objects.create(
+            actor=request.user,
+            category="ADMIN",
+            action="USER_BLOCKED",
+            description="Admin blocked a user.",
+            target_type="User",
+            target_id=str(user.id),
+            metadata={
+                "target_user_id": user.id,
+            },
+        )
+
         return success_response(
             message="User blocked successfully.",
             data={
@@ -417,6 +516,18 @@ class UserUnblockAPIView(APIView):
             action="USER_UNBLOCKED",
             target_user=user,
             reason="User unblocked by admin.",
+        )
+
+        AuditTrail.objects.create(
+            actor=request.user,
+            category="ADMIN",
+            action="USER_UNBLOCKED",
+            description="Admin unblocked a user.",
+            target_type="User",
+            target_id=str(user.id),
+            metadata={
+                "target_user_id": user.id,
+            },
         )
 
         return success_response(
@@ -630,6 +741,18 @@ class AdminUserFlagAPIView(APIView):
             reason="User flagged by admin.",
         )
 
+        AuditTrail.objects.create(
+            actor=request.user,
+            category="ADMIN",
+            action="USER_FLAGGED",
+            description="Admin flagged a user.",
+            target_type="User",
+            target_id=str(user.id),
+            metadata={
+                "target_user_id": user.id,
+            },
+        )
+
         return success_response(
             message="User flagged successfully.",
             data={
@@ -709,3 +832,28 @@ class AdminAuditLogListAPIView(APIView):
             data=data,
             status_code=status.HTTP_200_OK,
         )
+
+
+
+class AuditTrailListAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        logs = AuditTrail.objects.select_related("actor").all()[:100]
+
+        data = []
+        for log in logs:
+            data.append({
+                "id": log.id,
+                "actor": log.actor.email if log.actor else None,
+                "category": log.category,
+                "action": log.action,
+                "description": log.description,
+                "target_type": log.target_type,
+                "target_id": log.target_id,
+                "metadata": log.metadata,
+                "ip_address": log.ip_address,
+                "created_at": log.created_at,
+            })
+
+        return Response(data)

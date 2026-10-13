@@ -276,3 +276,73 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute="*/5"),
     },
 }
+
+
+
+# ============================================================
+# LOGGING - DAY 42
+# ============================================================
+
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+
+    "formatters": {
+        "verbose": {
+            "format": (
+                "{levelname} {asctime} {name} "
+                "{process:d} {thread:d} {message}"
+            ),
+            "style": "{",
+        },
+    },
+
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+        "application_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "application.log",
+            "formatter": "verbose",
+        },
+        "error_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "errors.log",
+            "level": "ERROR",
+            "formatter": "verbose",
+        },
+        "ai_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "ai_events.log",
+            "formatter": "verbose",
+        },
+    },
+
+    "loggers": {
+        "django": {
+            "handlers": ["console", "application_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console", "application_file", "error_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "jobs": {
+            "handlers": ["console", "application_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "ai_events": {
+            "handlers": ["console", "ai_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
