@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.throttling import AnonRateThrottle
 
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -60,8 +61,15 @@ def record_security_event(request, action, description):
     )
 
 
+class LoginRateThrottle(AnonRateThrottle):
+    scope = "login"
+
+
 class CustomTokenObtainPairView(TokenObtainPairView):
+    throttle_classes = [LoginRateThrottle]
+
     def post(self, request, *args, **kwargs):
+        # Keep your existing method implementation unchanged
         try:
             response = super().post(request, *args, **kwargs)
             return response

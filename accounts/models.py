@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from accounts.storage import EncryptedResumeStorage
 
 
 class User(AbstractUser):
@@ -85,6 +86,7 @@ class CandidateProfile(models.Model):
     expected_salary = models.PositiveIntegerField(default=0)
 
     resume = models.FileField(
+        storage=EncryptedResumeStorage(),
         upload_to="resumes/",
         blank=True,
         null=True,
