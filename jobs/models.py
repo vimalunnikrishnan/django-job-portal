@@ -4,6 +4,14 @@ from accounts.models import User
 
 class Job(models.Model):
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["is_active", "-created_at"],
+                name="job_active_created_idx",
+            ),
+        ]
+
     JOB_TYPE_CHOICES = [
         ("FULL_TIME", "Full Time"),
         ("PART_TIME", "Part Time"),
