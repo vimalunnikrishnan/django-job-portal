@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,GET /api/jobs/list/,HTTPError('429 Client Error: Too Many Requests for url: GET /api/jobs/list/'),94,2026-10-16T10:49:36Z,2026-10-16T10:50:04Z
