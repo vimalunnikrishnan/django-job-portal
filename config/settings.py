@@ -255,6 +255,7 @@ CACHES = {
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
+AI_PROVIDER = os.getenv("AI_PROVIDER", "mock").lower()
 
 # ============================================================
 # CELERY

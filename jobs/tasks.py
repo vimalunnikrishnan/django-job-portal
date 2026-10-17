@@ -63,7 +63,7 @@ def start_ai_interview_task(self, interview_id):
 
     CallLog.objects.create(
         interview=interview,
-        event="STARTED",
+        event="SCHEDULED",
         reason="AI voice call queued successfully.",
         details={
             "provider": "mock",

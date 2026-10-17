@@ -1,13 +1,21 @@
 import os
 import time
 
+from django.conf import settings
 from .base import AIRateLimitError
 from .mock_provider import MockAIProvider
 
 class AIBridgeService:
 
     def __init__(self, provider=None, max_retries=3):
-        self.provider = provider or MockAIProvider()
+        if provider is not None:
+            self.provider = provider
+        elif settings.AI_PROVIDER == "mock":
+            self.provider = MockAIProvider()
+        else:
+            raise ValueError(
+                f"Unsupported AI_PROVIDER: {settings.AI_PROVIDER}"
+            )
         self.max_retries = max_retries
         self.api_key = os.getenv("AI_API_KEY")
 

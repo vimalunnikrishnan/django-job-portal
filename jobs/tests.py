@@ -1,6 +1,6 @@
 ﻿from datetime import timedelta
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.core.cache import cache
 from django.core.serializers import python
@@ -16,6 +16,9 @@ from jobs.services.ai_bridge.service import AIBridgeService
 from jobs.services.ai_question_engine.engine import AIQuestionEngine
 from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
 from jobs.services.interview_reminder_service import InterviewReminderService
+from jobs.services.ai_bridge.service import AIBridgeService
+from jobs.tasks import start_ai_interview_task
+from jobs.models import CallLog
 
 class JobCreationAPITest(APITestCase):
 
@@ -290,6 +293,40 @@ class AIBridgeServiceTest(TestCase):
         )
         self.assertEqual(result["voice"], "female")
         self.assertEqual(result["language"], "en")
+
+
+    @patch(
+        "jobs.services.ai_bridge.service.settings.AI_PROVIDER",
+        "unsupported",
+    )
+    def test_unsupported_provider_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Unsupported AI_PROVIDER: unsupported",
+        ):
+            AIBridgeService()
+    @patch("jobs.services.ai_bridge.service.time.sleep")
+    def test_provider_failure_is_retried_three_times(self, mock_sleep):
+        provider = Mock()
+        provider.generate_text.side_effect = ConnectionError(
+            "Temporary provider failure"
+        )
+
+        bridge = AIBridgeService(
+            provider=provider,
+            max_retries=3,
+        )
+
+        result = bridge.generate_text("Test retry behavior")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(
+            result["error"],
+            "Temporary provider failure",
+        )
+        self.assertEqual(provider.generate_text.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+
 
 
 class AIQuestionEngineTest(TestCase):
@@ -1256,3 +1293,212 @@ class EmployerAnalyticsAPITest(APITestCase):
             len(data["daily_applications"]),
             7,
         )
+
+
+
+class AIInterviewInitiationAPITest(APITestCase):
+
+    def setUp(self):
+        self.candidate = User.objects.create_user(
+            username="init_candidate",
+            email="init_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.other_candidate = User.objects.create_user(
+            username="other_init_candidate",
+            email="other_init_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.employer = User.objects.create_user(
+            username="init_employer",
+            email="init_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Python Developer",
+            description="Python backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=25000,
+            max_salary=45000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+            status="SHORTLISTED",
+        )
+
+        self.url = (
+            f"/api/jobs/applications/"
+            f"{self.application.id}/ai-interview/"
+        )
+
+        self.client.force_authenticate(user=self.candidate)
+
+    @patch("jobs.views.start_ai_interview_task.delay")
+    def test_candidate_can_start_own_shortlisted_interview(
+        self, mock_delay
+    ):
+        response = self.client.post(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_202_ACCEPTED,
+        )
+        self.assertTrue(response.data["success"])
+        self.assertEqual(
+            response.data["data"]["status"],
+            "PENDING",
+        )
+
+        interview = AIInterview.objects.get(
+            application=self.application
+        )
+        mock_delay.assert_called_once_with(interview.id)
+
+    @patch("jobs.views.start_ai_interview_task.delay")
+    def test_duplicate_request_does_not_dispatch_again(
+        self, mock_delay
+    ):
+        first_response = self.client.post(self.url)
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_202_ACCEPTED,
+        )
+
+        second_response = self.client.post(self.url)
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            second_response.data["message"],
+            "AI interview already exists.",
+        )
+
+        mock_delay.assert_called_once()
+
+    @patch("jobs.views.start_ai_interview_task.delay")
+    def test_candidate_cannot_access_another_candidates_application(
+        self, mock_delay
+    ):
+        other_application = Application.objects.create(
+            candidate=self.other_candidate,
+            job=self.job,
+            status="SHORTLISTED",
+        )
+
+        response = self.client.post(
+            f"/api/jobs/applications/"
+            f"{other_application.id}/ai-interview/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        mock_delay.assert_not_called()
+
+    @patch("jobs.views.start_ai_interview_task.delay")
+    def test_non_shortlisted_application_is_rejected(
+        self, mock_delay
+    ):
+        self.application.status = "APPLIED"
+        self.application.save(update_fields=["status"])
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        mock_delay.assert_not_called()
+
+    @patch(
+        "jobs.views.start_ai_interview_task.delay",
+        side_effect=ConnectionError("Test broker unavailable"),
+    )
+    def test_broker_failure_marks_interview_failed(
+            self, mock_delay
+    ):
+        response = self.client.post(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+        interview = AIInterview.objects.get(
+            application=self.application
+        )
+
+        self.assertEqual(interview.status, "FAILED")
+        mock_delay.assert_called_once_with(interview.id)
+
+    @patch("jobs.tasks.AIBridgeService")
+    def test_task_successfully_schedules_interview(self, mock_bridge_class):
+        interview = AIInterview.objects.create(
+            application=self.application,
+            status="PENDING",
+        )
+
+        mock_bridge = mock_bridge_class.return_value
+        mock_bridge.make_call.return_value = {
+            "success": True,
+            "call_id": "MOCK-CALL-001",
+            "phone_number": "+910000000000",
+            "voice": "female",
+            "language": "en",
+            "status": "QUEUED",
+        }
+
+        result = start_ai_interview_task.run(interview.id)
+
+        interview.refresh_from_db()
+
+        self.assertEqual(interview.status, "SCHEDULED")
+        self.assertEqual(interview.call_id, "MOCK-CALL-001")
+        self.assertEqual(result["status"], "SCHEDULED")
+        mock_bridge.make_call.assert_called_once()
+
+        call_log = CallLog.objects.get(interview=interview)
+
+        self.assertEqual(call_log.event, "SCHEDULED")
+        self.assertEqual(
+            call_log.details["call_id"],
+            "MOCK-CALL-001",
+        )
+    @patch("jobs.tasks.AIBridgeService")
+    def test_task_marks_interview_failed_when_call_fails(
+        self, mock_bridge_class
+    ):
+        interview = AIInterview.objects.create(
+            application=self.application,
+            status="PENDING",
+        )
+
+        mock_bridge = mock_bridge_class.return_value
+        mock_bridge.make_call.return_value = {
+            "success": False,
+            "error": "AI provider operation failed.",
+        }
+
+        result = start_ai_interview_task.run(interview.id)
+
+        interview.refresh_from_db()
+
+        self.assertEqual(interview.status, "FAILED")
+        self.assertEqual(result["status"], "FAILED")
+        mock_bridge.make_call.assert_called_once()

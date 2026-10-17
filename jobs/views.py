@@ -518,7 +518,29 @@ class AIInterviewAPIView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        start_ai_interview_task.delay(interview.id)
+        try:
+            start_ai_interview_task.delay(interview.id)
+        except Exception:
+            logger.exception(
+                "Failed to dispatch AI interview task for interview_id=%s",
+                interview.id,
+            )
+            interview.status = "FAILED"
+            interview.save(update_fields=["status", "updated_at"])
+
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "errors": {
+                        "detail": (
+                            "AI interview service is temporarily unavailable. "
+                            "Please try again later."
+                        )
+                    },
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         return Response(
             {
