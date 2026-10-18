@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from django.db.migrations import serializer
 from django.utils import timezone
 from django.core.cache import cache
 from django.db.models import Count, Q
@@ -12,6 +13,7 @@ import logging
 logger = logging.getLogger("jobs")
 ai_logger = logging.getLogger("ai_events")
 
+from requests import request
 from rest_framework import status
 from rest_framework.filters import (
     OrderingFilter,
@@ -26,6 +28,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from billing.services import get_active_subscription
+from billing.services import can_create_job
 from accounts.models import AdminActionLog, CandidateProfile
 from accounts.permissions import IsEmployer, IsCandidate, IsAdmin
 from accounts.response import success_response
@@ -49,15 +53,24 @@ class JobCreateAPIView(APIView):
 
     permission_classes = [IsEmployer]
 
+    
     def post(self, request):
+        allowed, message = can_create_job(request.user)
+
+        if not allowed:
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {"subscription": [message]},
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         serializer = JobSerializer(data=request.data)
 
         if serializer.is_valid():
-
-            serializer.save(
-                employer=request.user,
-            )
+            serializer.save(employer=request.user)
 
             return success_response(
                 message="Job created successfully.",
@@ -629,13 +642,32 @@ class EmployerApplicationsAPIView(ListAPIView):
 
 
 
+
 class EmployerAnalyticsAPIView(APIView):
 
     permission_classes = [IsEmployer]
 
     def get(self, request):
-
         employer = request.user
+
+        subscription = get_active_subscription(employer)
+
+        if (
+            subscription is None
+            or not subscription.plan.includes_analytics
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "status_code": status.HTTP_403_FORBIDDEN,
+                    "errors": {
+                        "subscription": [
+                            "Premium analytics requires an active Enterprise subscription."
+                        ]
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         cache_key = f"employer-analytics:{employer.id}"
 
@@ -647,6 +679,8 @@ class EmployerAnalyticsAPIView(APIView):
                 data=cached_data,
                 status_code=status.HTTP_200_OK,
             )
+
+        # Keep the remainder of your existing analytics method below.
 
         jobs = Job.objects.filter(
             employer=employer,

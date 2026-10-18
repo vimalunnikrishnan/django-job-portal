@@ -2,6 +2,7 @@
 
 from unittest.mock import Mock, patch
 
+from billing.models import SubscriptionPlan, UserSubscription
 from django.core.cache import cache
 from django.core.serializers import python
 from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
@@ -35,6 +36,15 @@ class JobCreationAPITest(APITestCase):
             email="jobemployer@gmail.com",
             password="TestPassword123",
             role="EMPLOYER",
+        )
+
+        SubscriptionPlan.objects.create(
+            name="FREE",
+            description="Free plan with up to 3 job posts.",
+            price="0.00",
+            duration_days=30,
+            job_post_limit=3,
+            includes_analytics=False,
         )
 
         self.candidate_profile = CandidateProfile.objects.get(
@@ -1191,6 +1201,24 @@ class EmployerAnalyticsAPITest(APITestCase):
             email="analytics_employer@example.com",
             password="TestPassword123",
             role="EMPLOYER",
+        )
+
+        enterprise_plan = SubscriptionPlan.objects.create(
+            name="ENTERPRISE",
+            description="Premium analytics plan.",
+            price="4999.00",
+            duration_days=30,
+            job_post_limit=None,
+            includes_analytics=True,
+        )
+
+        now = timezone.now()
+        UserSubscription.objects.create(
+            user=self.employer,
+            plan=enterprise_plan,
+            status="ACTIVE",
+            start_date=now - timedelta(days=1),
+            end_date=now + timedelta(days=30),
         )
 
         # Keep the rest of your existing setUp() code unchanged.
