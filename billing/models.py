@@ -87,6 +87,11 @@ class PaymentTransaction(models.Model):
         related_name="transactions",
     )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    refunded_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
     currency = models.CharField(max_length=3, default="INR")
     status = models.CharField(
         max_length=20,
@@ -95,6 +100,12 @@ class PaymentTransaction(models.Model):
     )
     provider = models.CharField(max_length=50, blank=True)
     provider_transaction_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True,
+    )
+    provider_order_id = models.CharField(
         max_length=255,
         blank=True,
         null=True,
@@ -136,3 +147,18 @@ class BillingHistory(models.Model):
 
     def __str__(self):
         return f"{self.subscription_id} - {self.event_type}"
+
+
+class ProcessedWebhookEvent(models.Model):
+    provider = models.CharField(max_length=50, default="Razorpay")
+    event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=100)
+    refund_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.provider} - {self.event_type} - {self.event_id}"
