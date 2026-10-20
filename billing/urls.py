@@ -3,6 +3,7 @@ from billing.views import (
     CreatePaymentOrderAPIView,
     VerifyPaymentAPIView,
     RazorpayWebhookAPIView,
+    razorpay_test_page,
 )
 
 urlpatterns = [
@@ -20,5 +21,10 @@ urlpatterns = [
         "razorpay/webhook/",
         RazorpayWebhookAPIView.as_view(),
         name="razorpay-webhook",
+    ),
+    path(
+        "test-checkout/",
+        razorpay_test_page,
+        name="razorpay-test-checkout",
     ),
 ]

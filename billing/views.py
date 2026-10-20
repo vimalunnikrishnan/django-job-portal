@@ -8,6 +8,7 @@ from rest_framework.permissions import AllowAny
 
 from .razorpay_service import verify_webhook_signature
 
+from django.shortcuts import render
 from datetime import timedelta
 from django.utils import timezone
 from django.conf import settings
@@ -558,3 +559,7 @@ class RazorpayWebhookAPIView(APIView):
             {"success": True, "message": "Webhook processed."},
             status=status.HTTP_200_OK,
         )
+
+
+def razorpay_test_page(request):
+    return render(request, "billing/razorpay_test.html")
