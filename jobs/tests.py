@@ -2,7 +2,12 @@
 
 from unittest.mock import Mock, patch
 
-from billing.models import SubscriptionPlan, UserSubscription
+from billing.models import (
+    CandidateProfileAccess,
+    SubscriptionPlan,
+    UserSubscription,
+)
+
 from django.core.cache import cache
 from django.core.serializers import python
 from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
@@ -1100,7 +1105,6 @@ class CandidateReportServiceTest(TestCase):
 from rest_framework.test import APITestCase
 from rest_framework import status
 
-
 class CandidateReportAPITest(APITestCase):
     def setUp(self):
         self.employer = User.objects.create_user(
@@ -1138,6 +1142,16 @@ class CandidateReportAPITest(APITestCase):
         self.url = (
             f"/api/jobs/employer/applications/"
             f"{self.application.id}/report/"
+        )
+
+        self.free_plan = SubscriptionPlan.objects.create(
+            name="FREE",
+            description="Free plan for report API tests.",
+            price="0.00",
+            duration_days=30,
+            job_post_limit=3,
+            candidate_access_limit=10,
+            includes_analytics=False,
         )
 
     def test_unauthenticated_user_cannot_access_report(self):
@@ -1188,6 +1202,37 @@ class CandidateReportAPITest(APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_report_access_denied_when_candidate_limit_reached(self):
+        # Change the existing FREE plan's limit to zero
+        self.free_plan.candidate_access_limit = 0
+        self.free_plan.save(update_fields=["candidate_access_limit"])
+
+        UserSubscription.objects.create(
+            user=self.employer,
+            plan=self.free_plan,
+            status="ACTIVE",
+            start_date=timezone.now() - timedelta(days=1),
+            end_date=timezone.now() + timedelta(days=30),
+        )
+
+        self.client.force_authenticate(user=self.employer)
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            response.data["code"],
+            "CANDIDATE_ACCESS_LIMIT_REACHED",
+        )
+        self.assertFalse(
+            CandidateProfileAccess.objects.filter(
+                employer=self.employer,
+                candidate=self.candidate,
+            ).exists()
         )
 
 
@@ -1321,7 +1366,6 @@ class EmployerAnalyticsAPITest(APITestCase):
             len(data["daily_applications"]),
             7,
         )
-
 
 
 class AIInterviewInitiationAPITest(APITestCase):
@@ -1530,3 +1574,93 @@ class AIInterviewInitiationAPITest(APITestCase):
         self.assertEqual(interview.status, "FAILED")
         self.assertEqual(result["status"], "FAILED")
         mock_bridge.make_call.assert_called_once()
+
+
+class JobCandidateRankingAccessLimitTest(APITestCase):
+    def setUp(self):
+        self.employer = User.objects.create_user(
+            username="ranking_limit_employer",
+            email="ranking_limit_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.candidate = User.objects.create_user(
+            username="ranking_limit_candidate",
+            email="ranking_limit_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.profile = CandidateProfile.objects.get(
+            user=self.candidate,
+        )
+
+        self.plan = SubscriptionPlan.objects.create(
+            name="FREE",
+            description="Free plan",
+            price="0.00",
+            duration_days=30,
+            job_post_limit=3,
+            candidate_access_limit=0,
+            includes_analytics=False,
+        )
+
+        UserSubscription.objects.create(
+            user=self.employer,
+            plan=self.plan,
+            status="ACTIVE",
+            start_date=timezone.now() - timedelta(days=1),
+            end_date=timezone.now() + timedelta(days=30),
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Django Developer",
+            description="Backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=20000,
+            max_salary=40000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+        )
+
+        self.url = f"/api/jobs/{self.job.id}/candidates/ranking/"
+        self.client.force_authenticate(user=self.employer)
+
+    @patch("jobs.views.rank_candidates_for_job")
+    def test_ranking_denied_when_candidate_limit_reached(
+        self,
+        mock_rank,
+    ):
+        mock_rank.return_value = [
+            {
+                "candidate": self.profile,
+                "application": self.application,
+                "ats_score": Mock(
+                    skill_score=80,
+                    experience_score=70,
+                    education_score=60,
+                    match_percentage=75,
+                ),
+            }
+        ]
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            response.data["code"],
+            "CANDIDATE_ACCESS_LIMIT_REACHED",
+        )

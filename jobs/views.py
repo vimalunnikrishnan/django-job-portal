@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from django.core.mail import message
 from django.db.migrations import serializer
 from django.utils import timezone
 from django.core.cache import cache
@@ -28,6 +29,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from billing.services import can_access_candidate
 from billing.services import get_active_subscription
 from billing.services import can_create_job
 from accounts.models import AdminActionLog, CandidateProfile
@@ -1288,6 +1290,21 @@ class JobCandidateRankingAPIView(APIView):
             application = item["application"]
             ats_score = item["ats_score"]
 
+            allowed, message = can_access_candidate(
+                request.user,
+                candidate.user,
+            )
+
+            if not allowed:
+                return Response(
+                    {
+                        "success": False,
+                        "message": message,
+                        "code": "CANDIDATE_ACCESS_LIMIT_REACHED",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             data.append(
                 {
                     "rank": rank,
@@ -1420,11 +1437,11 @@ class AIAnswerScoreAPIView(APIView):
         )
 
 
-
 class CandidateReportAPIView(APIView):
     permission_classes = [IsEmployer]
 
     def get(self, request, application_id):
+        # Generate the report first. The service verifies ownership.
         report = CandidateReportService.generate_report(
             application_id=application_id,
             employer=request.user,
@@ -1437,6 +1454,21 @@ class CandidateReportAPIView(APIView):
                     "message": "Application not found.",
                 },
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        allowed, message = can_access_candidate(
+            request.user,
+            report["candidate"]["id"],
+        )
+
+        if not allowed:
+            return Response(
+                {
+                    "success": False,
+                    "message": message,
+                    "code": "CANDIDATE_ACCESS_LIMIT_REACHED",
+                },
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         return Response(

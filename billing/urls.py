@@ -1,6 +1,7 @@
 from django.urls import path
 from billing.views import (
     CreatePaymentOrderAPIView,
+    SubscriptionStatusAPIView,
     VerifyPaymentAPIView,
     RazorpayWebhookAPIView,
     razorpay_test_page,
@@ -26,5 +27,10 @@ urlpatterns = [
         "test-checkout/",
         razorpay_test_page,
         name="razorpay-test-checkout",
+    ),
+    path(
+        "subscription-status/",
+        SubscriptionStatusAPIView.as_view(),
+        name="subscription-status",
     ),
 ]

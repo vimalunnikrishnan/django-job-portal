@@ -7,6 +7,11 @@ from django.db import transaction
 from rest_framework.permissions import AllowAny
 
 from .razorpay_service import verify_webhook_signature
+from billing.services import (
+    get_active_subscription,
+    is_subscription_in_grace_period,
+    SUBSCRIPTION_GRACE_PERIOD_DAYS,
+)
 
 from django.shortcuts import render
 from datetime import timedelta
@@ -145,6 +150,78 @@ class CreatePaymentOrderAPIView(APIView):
                 },
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+
+class SubscriptionStatusAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, "role", None) != "EMPLOYER":
+            return Response(
+                {
+                    "success": False,
+                    "message": "Only employers can view subscription status.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        subscription = get_active_subscription(request.user)
+
+        if subscription is None:
+            free_plan = SubscriptionPlan.objects.filter(
+                name="FREE",
+                is_active=True,
+            ).first()
+
+            if free_plan is None:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "The Free plan is not configured.",
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            return Response(
+                {
+                    "success": True,
+                    "data": {
+                        "subscription_status": "INACTIVE",
+                        "plan": free_plan.name,
+                        "is_active": False,
+                        "end_date": None,
+                        "job_post_limit": free_plan.job_post_limit,
+                        "includes_analytics": free_plan.includes_analytics,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "subscription_id": subscription.id,
+                    "subscription_status": subscription.status,
+                    "plan": subscription.plan.name,
+                    "is_active": True,
+                    "end_date": subscription.end_date,
+                    "is_in_grace_period": is_subscription_in_grace_period(
+                        subscription
+                    ),
+                    "grace_period_end": (
+                        subscription.end_date
+                        + timedelta(days=SUBSCRIPTION_GRACE_PERIOD_DAYS)
+                    ),
+                    "job_post_limit": subscription.plan.job_post_limit,
+                    "includes_analytics": (
+                        subscription.plan.includes_analytics
+                    ),
+                },
+            },
+            status=status.HTTP_200_OK,
         )
 
 

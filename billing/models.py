@@ -20,6 +20,11 @@ class SubscriptionPlan(models.Model):
         blank=True,
         help_text="Leave blank for unlimited job posts.",
     )
+    candidate_access_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum candidate profiles accessible. Leave blank for unlimited access.",
+    )
     includes_analytics = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -162,3 +167,33 @@ class ProcessedWebhookEvent(models.Model):
 
     def __str__(self):
         return f"{self.provider} - {self.event_type} - {self.event_id}"
+
+
+class CandidateProfileAccess(models.Model):
+    employer = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="candidate_profile_accesses",
+        limit_choices_to={"role": "EMPLOYER"},
+    )
+
+    candidate = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="accessed_by_employers",
+        limit_choices_to={"role": "CANDIDATE"},
+    )
+
+    first_accessed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employer", "candidate"],
+                name="unique_employer_candidate_access",
+            ),
+        ]
+        ordering = ["-first_accessed_at"]
+
+    def __str__(self):
+        return f"{self.employer} accessed {self.candidate}"
