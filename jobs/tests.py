@@ -1367,6 +1367,20 @@ class EmployerAnalyticsAPITest(APITestCase):
             7,
         )
 
+    def test_analytics_rate_limit_returns_429(self):
+        self.client.force_authenticate(user=self.employer)
+        cache.clear()
+
+        response = None
+
+        for _ in range(31):
+            response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
 
 class AIInterviewInitiationAPITest(APITestCase):
 
@@ -1663,4 +1677,20 @@ class JobCandidateRankingAccessLimitTest(APITestCase):
         self.assertEqual(
             response.data["code"],
             "CANDIDATE_ACCESS_LIMIT_REACHED",
+        )
+
+    @patch("jobs.views.rank_candidates_for_job")
+    def test_ranking_rate_limit_returns_429(self, mock_rank):
+        mock_rank.return_value = []
+
+        cache.clear()
+
+        responses = [
+            self.client.get(self.url)
+            for _ in range(31)
+        ]
+
+        self.assertEqual(
+            responses[-1].status_code,
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )

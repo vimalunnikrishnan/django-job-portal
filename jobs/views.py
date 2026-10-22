@@ -29,6 +29,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from billing.throttles import PremiumRecruiterRateThrottle
 from billing.services import can_access_candidate
 from billing.services import get_active_subscription
 from billing.services import can_create_job
@@ -643,11 +644,10 @@ class EmployerApplicationsAPIView(ListAPIView):
         )
 
 
-
-
 class EmployerAnalyticsAPIView(APIView):
-
     permission_classes = [IsEmployer]
+    throttle_classes = [PremiumRecruiterRateThrottle]
+    throttle_scope = "premium_recruiter"
 
     def get(self, request):
         employer = request.user
@@ -1249,6 +1249,8 @@ class JobMatchPercentageAPIView(APIView):
 
 class JobCandidateRankingAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [PremiumRecruiterRateThrottle]
+    throttle_scope = "premium_recruiter"
 
     def get(self, request, pk):
         job = get_object_or_404(

@@ -207,6 +207,7 @@ REST_FRAMEWORK = {
         "anon": "10/minute",
         "user": "100/minute",
         "login": "5/minute",
+        "premium_recruiter": "30/minute",
     },
 
     "DEFAULT_FILTER_BACKENDS": (
