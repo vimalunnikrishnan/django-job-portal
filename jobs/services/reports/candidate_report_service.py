@@ -1,4 +1,3 @@
-
 from jobs.models import Application, ATSScore, AIInterview
 
 
@@ -161,6 +160,42 @@ class CandidateReportService:
 
                     answer_reports.append(answer_report)
 
+        # Explainable candidate evaluation summary
+        ats_match = (
+            ats.match_percentage
+            if ats is not None
+            else None
+        )
+
+        interview_score = (
+            interview.final_score
+            if interview is not None
+            else None
+        )
+
+        evaluation_summary = {
+            "ats_match_percentage": ats_match,
+            "interview_score": interview_score,
+            "ats_available": ats_match is not None,
+            "interview_score_available": interview_score is not None,
+            "recommendation_basis": [],
+            "assessment_note": (
+                "These indicators summarize recorded evaluation data. "
+                "They do not guarantee hiring success and must be reviewed "
+                "alongside the candidate's qualifications and interview."
+            ),
+        }
+
+        if ats_match is not None:
+            evaluation_summary["recommendation_basis"].append(
+                "ATS match percentage is available."
+            )
+
+        if interview_score is not None:
+            evaluation_summary["recommendation_basis"].append(
+                "AI interview score is available."
+            )
+
         return {
             "report_version": "1.0",
             "application": {
@@ -176,6 +211,7 @@ class CandidateReportService:
             },
             "ats_evaluation": ats_report,
             "interview_evaluation": interview_report,
+            "evaluation_summary": evaluation_summary,
             "answer_evaluations": answer_reports,
             "summary": {
                 "answers_evaluated": sum(

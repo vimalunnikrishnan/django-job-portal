@@ -1077,6 +1077,22 @@ class CandidateReportServiceTest(TestCase):
         self.assertIn("interview_evaluation", report)
         self.assertIn("summary", report)
 
+    def test_report_includes_evaluation_summary(self):
+        report = CandidateReportService.generate_report(
+            application_id=self.application.id,
+            employer=self.employer,
+        )
+
+        self.assertIn("evaluation_summary", report)
+
+        summary = report["evaluation_summary"]
+
+        self.assertIn("ats_match_percentage", summary)
+        self.assertIn("interview_score", summary)
+        self.assertIn("recommendation_basis", summary)
+        self.assertFalse(summary["ats_available"])
+        self.assertFalse(summary["interview_score_available"])
+
     def test_report_is_not_generated_for_another_employer(self):
         another_employer = User.objects.create_user(
             username="other_report_employer",
