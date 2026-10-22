@@ -3,8 +3,21 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import json
 
+from django.db.models import Sum
+from django.db.models.functions import TruncDate, TruncMonth
+
 from django.db import transaction
 from rest_framework.permissions import AllowAny
+from rest_framework.generics import ListAPIView
+from accounts.permissions import IsAdmin
+from accounts.models import AuditTrail
+
+from billing.serializers import (
+    AdminPaymentTransactionSerializer,
+    AdminBillingHistorySerializer,
+    AdminFinancialAuditSerializer
+)
+
 
 from .razorpay_service import verify_webhook_signature
 from billing.services import (
@@ -640,3 +653,119 @@ class RazorpayWebhookAPIView(APIView):
 
 def razorpay_test_page(request):
     return render(request, "billing/razorpay_test.html")
+
+
+class AdminTransactionListAPIView(ListAPIView):
+    permission_classes = [IsAdmin]
+    serializer_class = AdminPaymentTransactionSerializer
+
+    def get_queryset(self):
+        queryset = PaymentTransaction.objects.select_related(
+            "subscription",
+            "subscription__user",
+            "subscription__plan",
+        ).order_by("-created_at")
+
+        transaction_status = self.request.query_params.get("status")
+        if transaction_status:
+            queryset = queryset.filter(status=transaction_status.upper())
+
+        return queryset
+
+
+
+class AdminRevenueReportAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        from django.db.models import Sum
+        from django.db.models.functions import TruncDate, TruncMonth
+
+        from billing.models import BillingHistory
+
+        successful_payments = PaymentTransaction.objects.filter(
+            status="SUCCESS"
+        )
+
+        gross_revenue = successful_payments.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+
+        total_refunds = PaymentTransaction.objects.aggregate(
+            total=Sum("refunded_amount")
+        )["total"] or 0
+
+        net_revenue = gross_revenue - total_refunds
+
+        daily_revenue = list(
+            successful_payments.annotate(
+                date=TruncDate("created_at")
+            )
+            .values("date")
+            .annotate(total=Sum("amount"))
+            .order_by("-date")[:30]
+        )
+
+        monthly_revenue = list(
+            successful_payments.annotate(
+                month=TruncMonth("created_at")
+            )
+            .values("month")
+            .annotate(total=Sum("amount"))
+            .order_by("-month")[:12]
+        )
+
+        plan_revenue = list(
+            successful_payments.values(
+                "subscription__plan__name"
+            )
+            .annotate(total=Sum("amount"))
+            .order_by("-total")
+        )
+
+        return Response({
+            "gross_revenue": gross_revenue,
+            "total_refunds": total_refunds,
+            "net_revenue": net_revenue,
+            "daily_revenue": daily_revenue,
+            "monthly_revenue": monthly_revenue,
+            "plan_wise_revenue": plan_revenue,
+        }, status=status.HTTP_200_OK)
+
+
+
+class AdminBillingHistoryAPIView(ListAPIView):
+    permission_classes = [IsAdmin]
+    serializer_class = AdminBillingHistorySerializer
+
+    def get_queryset(self):
+        queryset = BillingHistory.objects.select_related(
+            "subscription",
+            "subscription__user",
+            "subscription__plan",
+        ).order_by("-created_at")
+
+        event_type = self.request.query_params.get("event_type")
+        if event_type:
+            queryset = queryset.filter(event_type=event_type.upper())
+
+        return queryset
+
+
+
+class AdminFinancialAuditAPIView(ListAPIView):
+    permission_classes = [IsAdmin]
+    serializer_class = AdminFinancialAuditSerializer
+
+    def get_queryset(self):
+        queryset = AuditTrail.objects.all().order_by("-created_at")
+
+        category = self.request.query_params.get("category")
+        if category:
+            queryset = queryset.filter(category=category.upper())
+
+        action = self.request.query_params.get("action")
+        if action:
+            queryset = queryset.filter(action__icontains=action)
+
+        return queryset

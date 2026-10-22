@@ -1,5 +1,9 @@
 from django.urls import path
 from billing.views import (
+    AdminTransactionListAPIView,
+    AdminRevenueReportAPIView,
+    AdminBillingHistoryAPIView,
+    AdminFinancialAuditAPIView,
     CreatePaymentOrderAPIView,
     SubscriptionStatusAPIView,
     VerifyPaymentAPIView,
@@ -8,6 +12,26 @@ from billing.views import (
 )
 
 urlpatterns = [
+    path(
+        "admin/transactions/",
+        AdminTransactionListAPIView.as_view(),
+        name="admin-transaction-list",
+    ),
+    path(
+        "admin/revenue/",
+        AdminRevenueReportAPIView.as_view(),
+        name="admin-revenue-report",
+    ),
+    path(
+        "admin/billing-history/",
+        AdminBillingHistoryAPIView.as_view(),
+        name="admin-billing-history",
+    ),
+    path(
+        "admin/financial-audit/",
+        AdminFinancialAuditAPIView.as_view(),
+        name="admin-financial-audit",
+    ),
     path(
         "create-order/",
         CreatePaymentOrderAPIView.as_view(),

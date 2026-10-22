@@ -13,8 +13,12 @@ from billing.services import (
 )
 
 from accounts.models import User
-from billing.models import CandidateProfileAccess
-from billing.models import SubscriptionPlan, UserSubscription
+from billing.models import (
+    CandidateProfileAccess,
+    PaymentTransaction,
+    SubscriptionPlan,
+    UserSubscription,
+)
 from billing.services import get_active_subscription
 from billing.services import can_create_job
 from jobs.models import Job
@@ -421,3 +425,116 @@ class SubscriptionGracePeriodTest(APITestCase):
         self.assertIsNone(active_subscription)
         subscription.refresh_from_db()
         self.assertEqual(subscription.status, "EXPIRED")
+
+
+
+class AdminFinanceAPITest(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="finance_admin",
+            email="finance_admin@example.com",
+            password="TestPass123!",
+            role="ADMIN",
+            is_staff=True,
+            is_superuser=True,
+        )
+
+        self.candidate = User.objects.create_user(
+            username="finance_candidate",
+            email="finance_candidate@example.com",
+            password="TestPass123!",
+            role="CANDIDATE",
+        )
+
+        self.plan = SubscriptionPlan.objects.create(
+            name="PRO",
+            description="Finance API test plan",
+            price=999,
+            duration_days=30,
+            job_post_limit=10,
+            candidate_access_limit=100,
+            is_active=True,
+        )
+
+        self.subscription = UserSubscription.objects.create(
+            user=self.admin,
+            plan=self.plan,
+            status="ACTIVE",
+            start_date=timezone.now(),
+            end_date=timezone.now() + timedelta(days=30),
+        )
+
+        PaymentTransaction.objects.create(
+            subscription=self.subscription,
+            amount=999,
+            refunded_amount=0,
+            currency="INR",
+            status="SUCCESS",
+            provider="TEST",
+        )
+
+        self.transactions_url = "/api/billing/admin/transactions/"
+        self.revenue_url = "/api/billing/admin/revenue/"
+
+    def test_admin_can_list_transactions(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(self.transactions_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+
+    def test_candidate_cannot_list_transactions(self):
+        self.client.force_authenticate(user=self.candidate)
+
+        response = self.client.get(self.transactions_url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_view_revenue_report(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(self.revenue_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(float(response.data["gross_revenue"]), 999.0)
+        self.assertEqual(float(response.data["net_revenue"]), 999.0)
+
+    def test_candidate_cannot_view_revenue_report(self):
+        self.client.force_authenticate(user=self.candidate)
+
+        response = self.client.get(self.revenue_url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_transaction_status_filter(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.transactions_url,
+            {"status": "SUCCESS"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+
+    def test_admin_can_view_financial_audit(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            "/api/billing/admin/financial-audit/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_candidate_cannot_view_financial_audit(self):
+        self.client.force_authenticate(user=self.candidate)
+
+        response = self.client.get(
+            "/api/billing/admin/financial-audit/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
