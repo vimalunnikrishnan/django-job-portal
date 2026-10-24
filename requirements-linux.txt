@@ -70,3 +70,5 @@ python-dotenv
 django-celery-beat
 
 cryptography
+
+razorpay
