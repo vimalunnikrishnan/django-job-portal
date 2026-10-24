@@ -68,3 +68,5 @@ zope.interface==8.6
 python-dotenv
 
 django-celery-beat
+
+cryptography
