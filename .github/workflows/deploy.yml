@@ -1,0 +1,47 @@
+
+name: Deploy Django Job Portal
+
+on:
+  workflow_run:
+    workflows: ["Django CI"]
+    types:
+      - completed
+    branches:
+      - master
+
+jobs:
+  deploy:
+    name: Deploy to AWS EC2
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy application on EC2
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DEPLOY_SHA
+          script: |
+            set -e
+            cd /home/ec2-user/django-job-portal
+            git fetch origin master
+            test -n "$DEPLOY_SHA"
+            git cat-file -e "${DEPLOY_SHA}^{commit}"
+            git merge-base --is-ancestor "$DEPLOY_SHA" origin/master
+            if [ ! -f requirements-linux.txt.day52-backup ]; then
+                cp requirements-linux.txt requirements-linux.txt.day52-backup
+            fi
+            git checkout --detach "$DEPLOY_SHA"
+            git show "$DEPLOY_SHA:requirements-linux.txt" > /tmp/requirements-linux.txt
+            source venv321/bin/activate
+            pip install -r /tmp/requirements-linux.txt
+            python manage.py check
+            python manage.py migrate --noinput
+            python manage.py collectstatic --noinput
+            sudo systemctl restart gunicorn
+            sudo systemctl is-active --quiet gunicorn
+            echo "Deployment completed successfully"
