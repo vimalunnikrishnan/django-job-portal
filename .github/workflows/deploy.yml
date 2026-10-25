@@ -9,11 +9,19 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
+concurrency:
+  group: django-job-portal-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to AWS EC2
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Deploy application on EC2
@@ -26,22 +34,59 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: DEPLOY_SHA
           script: |
-            set -e
+            set -eu
             cd /home/ec2-user/django-job-portal
+
+            exec 9>/tmp/django-job-portal-deploy.lock
+            flock -n 9 || {
+              echo "Another deployment is already running."
+              exit 1
+            }
+
             git fetch origin master
             test -n "$DEPLOY_SHA"
             git cat-file -e "${DEPLOY_SHA}^{commit}"
-            git merge-base --is-ancestor "$DEPLOY_SHA" origin/master
-            if [ ! -f requirements-linux.txt.day52-backup ]; then
-                cp requirements-linux.txt requirements-linux.txt.day52-backup
+            test "$DEPLOY_SHA" = "$(git rev-parse origin/master)"
+
+            if ! git ls-files --error-unmatch requirements-linux.txt >/dev/null 2>&1; then
+              test -f requirements-linux.txt
+              if [ ! -f requirements-linux.txt.day52-backup ]; then
+                cp -n requirements-linux.txt requirements-linux.txt.day52-backup
+              fi
+              cmp -s requirements-linux.txt requirements-linux.txt.day52-backup || {
+                echo "ERROR: Requirements backup mismatch"
+                exit 1
+              }
+              rm requirements-linux.txt
             fi
-            git checkout --detach "$DEPLOY_SHA"
+
             git show "$DEPLOY_SHA:requirements-linux.txt" > /tmp/requirements-linux.txt
-            source venv321/bin/activate
-            pip install -r /tmp/requirements-linux.txt
-            python manage.py check
-            python manage.py migrate --noinput
-            python manage.py collectstatic --noinput
+            /home/ec2-user/django-job-portal/venv321/bin/python -m pip install -r /tmp/requirements-linux.txt
+
+            git checkout --detach "$DEPLOY_SHA"
+
+            run_django() {
+              command_name="$1"
+              shift
+              sudo systemd-run \
+                --wait \
+                --pipe \
+                --collect \
+                --unit="django-deploy-${command_name}-$(date +%s)" \
+                --property=User=ec2-user \
+                --property=Group=nginx \
+                --property=WorkingDirectory=/home/ec2-user/django-job-portal \
+                --property=EnvironmentFile=/etc/django-job-portal.env \
+                /home/ec2-user/django-job-portal/venv321/bin/python \
+                manage.py "$@"
+            }
+
+            run_django check
+            run_django migrate --noinput
+            run_django collectstatic --noinput
+
             sudo systemctl restart gunicorn
             sudo systemctl is-active --quiet gunicorn
+
+            rm -f /tmp/requirements-linux.txt
             echo "Deployment completed successfully"
