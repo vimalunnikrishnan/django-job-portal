@@ -1,5 +1,5 @@
 from django.core.files.base import ContentFile
-from django.core.files.storage import FileSystemStorage
+from storages.backends.s3 import S3Storage
 
 from accounts.services.resume_encryption import (
     encrypt_resume,
@@ -7,13 +7,19 @@ from accounts.services.resume_encryption import (
 )
 
 
-class EncryptedResumeStorage(FileSystemStorage):
+class EncryptedResumeStorage(S3Storage):
     """
-    Encrypt resume contents before saving them.
-    Decrypt encrypted resumes when they are opened.
+    Store encrypted resumes in private S3 storage.
+    Decrypt resumes when they are opened through Django.
     """
 
     ENCRYPTION_MARKER = b"RESUME_ENCRYPTED_V1:"
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("default_acl", None)
+        kwargs.setdefault("querystring_auth", True)
+        kwargs.setdefault("file_overwrite", False)
+        super().__init__(*args, **kwargs)
 
     def _save(self, name, content):
         original_content = content.read()
@@ -28,13 +34,12 @@ class EncryptedResumeStorage(FileSystemStorage):
         )
 
     def _open(self, name, mode="rb"):
-        file = super()._open(name, mode)
-
         if mode != "rb":
-            file.close()
             raise ValueError(
                 "Encrypted resumes can only be opened in read mode."
             )
+
+        file = super()._open(name, mode)
 
         try:
             content = file.read()

@@ -72,3 +72,6 @@ django-celery-beat
 cryptography
 
 razorpay
+
+boto3==1.43.118
+django-storages[s3]==1.14.6
