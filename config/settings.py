@@ -242,6 +242,7 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 
     "UPDATE_LAST_LOGIN": True,
+    "CHECK_REVOKE_TOKEN": True,
 }
 
 
