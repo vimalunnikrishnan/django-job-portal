@@ -1,9 +1,9 @@
-from dotenv import load_dotenv
 import os
-from celery.schedules import crontab
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
 
+from celery.schedules import crontab
+from dotenv import load_dotenv
 
 # ============================================================
 # BASE DIRECTORY

@@ -1,48 +1,39 @@
-import logging
-from decimal import Decimal, ROUND_HALF_UP
-
 import json
-
-from django.db.models import Sum
-from django.db.models.functions import TruncDate, TruncMonth
-
-from django.db import transaction
-from rest_framework.permissions import AllowAny
-from rest_framework.generics import ListAPIView
-from accounts.permissions import IsAdmin
-from accounts.models import AuditTrail
-
-from billing.serializers import (
-    AdminPaymentTransactionSerializer,
-    AdminBillingHistorySerializer,
-    AdminFinancialAuditSerializer
-)
-
-
-from .razorpay_service import verify_webhook_signature
-from billing.services import (
-    get_active_subscription,
-    is_subscription_in_grace_period,
-    SUBSCRIPTION_GRACE_PERIOD_DAYS,
-)
-
-from django.shortcuts import render
+import logging
 from datetime import timedelta
-from django.utils import timezone
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.conf import settings
 from django.db import transaction
+from django.shortcuts import render
+from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.generics import ListAPIView
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import AuditTrail
+from accounts.permissions import IsAdmin
 from billing.models import (
     BillingHistory,
     PaymentTransaction,
-    ProcessedWebhookEvent,
     SubscriptionPlan,
     UserSubscription,
 )
+from billing.serializers import (
+    AdminBillingHistorySerializer,
+    AdminFinancialAuditSerializer,
+    AdminPaymentTransactionSerializer,
+    PaymentVerificationSerializer,
+)
+from billing.services import (
+    SUBSCRIPTION_GRACE_PERIOD_DAYS,
+    get_active_subscription,
+    is_subscription_in_grace_period,
+)
+
 from .razorpay_service import (
     RazorpayServiceError,
     create_razorpay_order,
@@ -57,6 +48,30 @@ logger = logging.getLogger(__name__)
 class CreatePaymentOrderAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+    summary="Create a Razorpay payment order.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "integer"},
+            },
+            "required": ["plan_id"],
+        }
+    },
+    responses={
+        201: dict,
+        400: dict,
+        403: dict,
+        404: dict,
+        502: dict,
+    },
+    description=(
+        "Create a Razorpay payment order for an active paid subscription plan. "
+        "Only authenticated employers can purchase subscriptions."
+    ),
+    tags=["Billing & Payments"],
+    )
     def post(self, request):
         if getattr(request.user, "role", None) != "EMPLOYER":
             return Response(
@@ -170,6 +185,19 @@ class CreatePaymentOrderAPIView(APIView):
 class SubscriptionStatusAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+    summary="Retrieve the employer subscription status.",
+    responses={
+        200: dict,
+        403: dict,
+        503: dict,
+    },
+    description=(
+        "Retrieve the authenticated employer's subscription status, "
+        "plan limits, analytics access, and applicable grace-period details."
+    ),
+    tags=["Billing & Payments"],
+    )
     def get(self, request):
         if getattr(request.user, "role", None) != "EMPLOYER":
             return Response(
@@ -241,8 +269,26 @@ class SubscriptionStatusAPIView(APIView):
 class VerifyPaymentAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+    summary="Verify Razorpay payment and activate subscription.",
+    request=PaymentVerificationSerializer,
+    responses={
+        200: dict,
+        400: dict,
+        403: dict,
+        404: dict,
+        409: dict,
+        500: dict,
+        502: dict,
+    },
+    description=(
+        "Verify a Razorpay payment using its order ID, payment ID, "
+        "and signature. On successful verification, activate the "
+        "subscription and record the payment."
+    ),
+    tags=["Billing & Payments"],
+    )
     def post(self, request):
-        from billing.serializers import PaymentVerificationSerializer
 
         serializer = PaymentVerificationSerializer(data=request.data)
         if not serializer.is_valid():
@@ -305,7 +351,10 @@ class VerifyPaymentAPIView(APIView):
             razorpay_payment = fetch_razorpay_payment(payment_id)
         except RazorpayServiceError:
             return Response(
-                {"success": False, "message": "Unable to verify payment with Razorpay."},
+                {
+                    "success": False,
+                    "message": "Unable to verify payment with Razorpay.",
+                },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
@@ -319,7 +368,10 @@ class VerifyPaymentAPIView(APIView):
             or razorpay_payment.get("currency") != payment.currency
         ):
             return Response(
-                {"success": False, "message": "Payment details do not match the transaction."},
+                {
+                    "success": False,
+                    "message": "Payment details do not match the transaction.",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -356,8 +408,10 @@ class VerifyPaymentAPIView(APIView):
                         status=status.HTTP_409_CONFLICT,
                     )
 
-                subscription = UserSubscription.objects.select_for_update().get(
-                    pk=payment.subscription_id
+                subscription = (
+                    UserSubscription.objects.select_for_update().get(
+                        pk=payment.subscription_id
+                    )
                 )
 
                 now = timezone.now()
@@ -421,6 +475,26 @@ class RazorpayWebhookAPIView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    @extend_schema(
+    summary="Process Razorpay payment webhook events.",
+    request={
+        "application/json": {
+            "type": "object",
+            "description": "Razorpay webhook event payload.",
+        }
+    },
+    responses={
+        200: dict,
+        400: dict,
+        500: dict,
+    },
+    description=(
+        "Receive and process Razorpay webhook events. "
+        "Validates the webhook signature and handles captured payments, "
+        "failed payments, and processed refunds. Duplicate events are ignored."
+    ),
+    tags=["Billing & Payments"],
+    )
     def post(self, request):
         from billing.models import ProcessedWebhookEvent
 
@@ -523,8 +597,10 @@ class RazorpayWebhookAPIView(APIView):
                             raise ValueError("Cannot capture a failed transaction.")
 
                         if payment.status == "PENDING":
-                            subscription = UserSubscription.objects.select_for_update().get(
-                                pk=payment.subscription_id
+                            subscription = (
+                                UserSubscription.objects.select_for_update().get(
+                                    pk=payment.subscription_id
+                                )
                             )
 
                             now = timezone.now()
@@ -589,7 +665,10 @@ class RazorpayWebhookAPIView(APIView):
                         )
                     refund_amount_paise = refund_entity.get("amount")
 
-                    if not isinstance(refund_amount_paise, int) or refund_amount_paise <= 0:
+                    if (
+                        not isinstance(refund_amount_paise, int)
+                        or refund_amount_paise <= 0
+                    ):
                         raise ValueError("Invalid refund amount.")
 
                     payment = PaymentTransaction.objects.select_for_update().filter(
@@ -655,6 +734,13 @@ def razorpay_test_page(request):
     return render(request, "billing/razorpay_test.html")
 
 
+@extend_schema(
+    summary="Retrieve payment transaction records.",
+    description=(
+        "Retrieve payment transactions for administrative review."
+        "Supports filtering by transaction status."
+    ),
+)
 class AdminTransactionListAPIView(ListAPIView):
     permission_classes = [IsAdmin]
     serializer_class = AdminPaymentTransactionSerializer
@@ -673,15 +759,22 @@ class AdminTransactionListAPIView(ListAPIView):
         return queryset
 
 
-
 class AdminRevenueReportAPIView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+    summary="Retrieve the administrative revenue report.",
+    responses={200: dict},
+    description=(
+        "Retrieve the platform revenue report, including gross revenue, "
+        "total refunds, net revenue, daily revenue for the latest 30 entries, "
+        "monthly revenue for the latest 12 entries, and plan-wise revenue."
+    ),
+    tags=["Admin Revenue Reports"],
+    )
     def get(self, request):
         from django.db.models import Sum
         from django.db.models.functions import TruncDate, TruncMonth
-
-        from billing.models import BillingHistory
 
         successful_payments = PaymentTransaction.objects.filter(
             status="SUCCESS"
@@ -733,7 +826,10 @@ class AdminRevenueReportAPIView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-
+@extend_schema(
+    summary="Retrieve administrative billing history.",
+    description="Retrieve billing history records with optional event type filtering.",
+)
 class AdminBillingHistoryAPIView(ListAPIView):
     permission_classes = [IsAdmin]
     serializer_class = AdminBillingHistorySerializer
@@ -752,7 +848,13 @@ class AdminBillingHistoryAPIView(ListAPIView):
         return queryset
 
 
-
+@extend_schema(
+    summary="Retrieve financial audit records.",
+    description=(
+        "Retrieve financial audit records with optional "
+        "category and action filters."
+    ),
+)
 class AdminFinancialAuditAPIView(ListAPIView):
     permission_classes = [IsAdmin]
     serializer_class = AdminFinancialAuditSerializer

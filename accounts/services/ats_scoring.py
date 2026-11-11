@@ -1,5 +1,7 @@
 
 from jobs.models import ATSScore
+
+
 def normalize_skills(skills_text):
     """
     Convert comma-separated skills into a normalized list.
@@ -24,20 +26,18 @@ def calculate_skill_score(job_skills, candidate_skills):
     """
 
     required_skills = normalize_skills(job_skills)
-    candidate_skill_list = normalize_skills(candidate_skills)
+    candidate_skill_set = set(normalize_skills(candidate_skills))
 
     if not required_skills:
         return 0
 
-    matched_skills = []
-
-    for skill in required_skills:
-
-        if skill in candidate_skill_list:
-            matched_skills.append(skill)
+    matched_count = sum(
+        skill in candidate_skill_set
+        for skill in required_skills
+    )
 
     score = (
-        len(matched_skills)
+        matched_count
         / len(required_skills)
     ) * 100
 

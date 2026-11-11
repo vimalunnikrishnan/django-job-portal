@@ -1,6 +1,5 @@
 import re
 
-
 # Predefined skills library
 SKILL_ALIASES = {
     "Python": [
@@ -91,73 +90,37 @@ def tokenize_text(text):
     return re.findall(r"\b[\w+#.-]+\b", text)
 
 
+STOP_WORDS = {
+    "the", "and", "or", "of", "to", "in", "on", "for",
+    "with", "a", "an", "is", "are", "was", "were", "as",
+    "at", "by", "from", "into", "through", "this", "that",
+    "these", "those", "using", "used", "have", "has", "had",
+    "been", "being", "can", "will", "would", "should",
+    "their", "they", "them", "it", "its", "my", "our",
+    "your", "we", "you", "I",
+}
+
+
+def _matches_alias(text, alias):
+    pattern = r"\b" + re.escape(alias) + r"\b"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
 def extract_keywords(text):
     """
     Extract meaningful keywords from resume text
     by removing common stop words.
     """
 
-    stop_words = {
-        "the",
-        "and",
-        "or",
-        "of",
-        "to",
-        "in",
-        "on",
-        "for",
-        "with",
-        "a",
-        "an",
-        "is",
-        "are",
-        "was",
-        "were",
-        "as",
-        "at",
-        "by",
-        "from",
-        "into",
-        "through",
-        "this",
-        "that",
-        "these",
-        "those",
-        "using",
-        "used",
-        "have",
-        "has",
-        "had",
-        "been",
-        "being",
-        "can",
-        "will",
-        "would",
-        "should",
-        "their",
-        "they",
-        "them",
-        "it",
-        "its",
-        "my",
-        "our",
-        "your",
-        "we",
-        "you",
-        "I",
-    }
-
     tokens = tokenize_text(text)
-
     keywords = []
 
     for token in tokens:
-
         normalized_token = token.lower()
 
         if (
             len(token) > 2
-            and normalized_token not in stop_words
+            and normalized_token not in STOP_WORDS
         ):
             keywords.append(token)
 
@@ -176,9 +139,7 @@ def extract_skills(text):
 
         for alias in aliases:
 
-            pattern = r"\b" + re.escape(alias) + r"\b"
-
-            if re.search(pattern, text, re.IGNORECASE):
+            if _matches_alias(text, alias):
                 skills.append(canonical_skill)
                 break
 
@@ -231,9 +192,7 @@ def extract_roles(text):
 
     for role in roles_library:
 
-        pattern = r"\b" + re.escape(role) + r"\b"
-
-        if re.search(pattern, text, re.IGNORECASE):
+        if _matches_alias(text, role):
             roles.append(role)
 
     return roles
@@ -305,9 +264,7 @@ def extract_education(text):
 
         for alias in aliases:
 
-            pattern = r"\b" + re.escape(alias) + r"\b"
-
-            if re.search(pattern, text, re.IGNORECASE):
+            if _matches_alias(text, alias):
                 education.append(qualification)
                 break
 

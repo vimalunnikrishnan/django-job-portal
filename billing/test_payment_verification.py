@@ -1,7 +1,6 @@
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 

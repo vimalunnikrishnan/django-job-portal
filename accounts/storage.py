@@ -2,8 +2,8 @@ from django.core.files.base import ContentFile
 from storages.backends.s3 import S3Storage
 
 from accounts.services.resume_encryption import (
-    encrypt_resume,
     decrypt_resume,
+    encrypt_resume,
 )
 
 

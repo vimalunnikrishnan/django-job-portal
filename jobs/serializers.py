@@ -1,6 +1,14 @@
 from rest_framework import serializers
 
-from .models import Job, Application, SavedJob, ATSScore, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule
+from .models import (
+    AIAnswerEvaluation,
+    Application,
+    ATSScore,
+    InterviewAvailability,
+    InterviewSchedule,
+    Job,
+    SavedJob,
+)
 
 
 class JobSerializer(serializers.ModelSerializer):
@@ -138,18 +146,6 @@ class InterviewScheduleSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-
-
-class RankedCandidateSerializer(serializers.Serializer):
-    rank = serializers.IntegerField()
-    candidate_id = serializers.IntegerField()
-    candidate_email = serializers.EmailField()
-    application_id = serializers.IntegerField()
-    application_status = serializers.CharField()
-    skill_score = serializers.FloatField()
-    experience_score = serializers.FloatField()
-    education_score = serializers.FloatField()
-    match_percentage = serializers.FloatField()
 
 
 class RankedCandidateSerializer(serializers.Serializer):

@@ -1,7 +1,6 @@
 from django.utils import timezone
 
 from jobs.models import (
-    AIInterviewSession,
     AIAnswer,
     AIQuestion,
     JobQuestionMapping,
@@ -136,20 +135,17 @@ class AIQuestionEngine:
 
         self.save_answer(question, answer_text)
 
-        should_follow_up = self.should_ask_follow_up(
+        follow_up = self.get_follow_up_question(question)
+
+        if follow_up and self.should_ask_follow_up(
             question,
             answer_text,
-        )
-
-        if should_follow_up:
-            follow_up = self.get_follow_up_question(question)
-
-            if follow_up:
-                return {
-                    "action": "FOLLOW_UP",
-                    "question_template": follow_up,
-                    "question": follow_up.question,
-                }
+        ):
+            return {
+                "action": "FOLLOW_UP",
+                "question_template": follow_up,
+                "question": follow_up.question,
+            }
 
         self.advance_question_index()
 

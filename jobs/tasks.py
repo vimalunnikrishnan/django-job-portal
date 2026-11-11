@@ -1,11 +1,13 @@
-﻿from accounts.models import CandidateProfile
-from accounts.services.resume_parser import extract_resume_text
-from celery import shared_task
+﻿from celery import shared_task
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.mail import send_mail
-from django.conf import settings
-from jobs.services.ai_bridge.service import AIBridgeService
+
+from accounts.models import CandidateProfile
+from accounts.services.resume_parser import extract_resume_text
 from jobs.models import CallLog
+from jobs.services.ai_bridge.service import AIBridgeService
+
 
 @shared_task(
     bind=True,

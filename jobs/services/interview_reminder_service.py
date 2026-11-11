@@ -4,15 +4,19 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from jobs.models import InterviewReminder, InterviewSchedule
-
 from accounts.services.notification_email_service import (
     send_notification_email,
 )
-
+from jobs.models import InterviewReminder, InterviewSchedule
 
 
 class InterviewReminderService:
+    ACTIVE_SCHEDULE_STATUSES = [
+        "SCHEDULED",
+        "CONFIRMED",
+        "RESCHEDULED",
+    ]
+
     REMINDER_STAGES = {
         "24_HOURS": timedelta(hours=24),
         "1_HOUR": timedelta(hours=1),
@@ -25,7 +29,7 @@ class InterviewReminderService:
         latest_reminder = now + timedelta(hours=24)
 
         return InterviewSchedule.objects.filter(
-            status__in=["SCHEDULED", "CONFIRMED", "RESCHEDULED"],
+            status__in=InterviewReminderService.ACTIVE_SCHEDULE_STATUSES,
             scheduled_start__gt=now,
             scheduled_start__lte=latest_reminder,
         ).select_related(
@@ -44,11 +48,7 @@ class InterviewReminderService:
         return InterviewReminder.objects.filter(
             status="FAILED",
             updated_at__lte=retry_cutoff,
-            schedule__status__in=[
-                "SCHEDULED",
-                "CONFIRMED",
-                "RESCHEDULED",
-            ],
+            schedule__status__in=InterviewReminderService.ACTIVE_SCHEDULE_STATUSES,
             schedule__scheduled_start__gt=now,
             attempt_count__lt=3,
         ).select_related(
@@ -95,7 +95,7 @@ class InterviewReminderService:
                 "message": "Reminder was already sent.",
         }
 
-        if schedule.status not in ["SCHEDULED", "CONFIRMED", "RESCHEDULED"]:
+        if schedule.status not in cls.ACTIVE_SCHEDULE_STATUSES:
             return {
                 "status": "SKIPPED",
                 "message": "Interview is no longer scheduled.",

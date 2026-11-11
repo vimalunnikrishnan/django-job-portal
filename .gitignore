@@ -12,3 +12,12 @@ staticfiles/
 .vscode/
 celerybeat-schedule*
 logs/
+
+# Temporary test files
+test_media/
+
+# Python test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/

@@ -1,8 +1,7 @@
-import os
 import re
 
-from PyPDF2 import PdfReader
 from docx import Document
+from PyPDF2 import PdfReader
 
 
 def extract_text_from_pdf(file):

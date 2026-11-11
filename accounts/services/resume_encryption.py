@@ -14,10 +14,10 @@ def get_fernet():
 
     try:
         return Fernet(key.encode())
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
         raise ImproperlyConfigured(
             "RESUME_ENCRYPTION_KEY is invalid."
-        )
+        ) from exc
 
 
 def encrypt_resume(file_content: bytes) -> bytes:

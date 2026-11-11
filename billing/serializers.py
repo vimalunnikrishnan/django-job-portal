@@ -1,7 +1,7 @@
 from rest_framework import serializers
-from billing.models import PaymentTransaction
-from billing.models import BillingHistory
+
 from accounts.models import AuditTrail
+from billing.models import BillingHistory, PaymentTransaction
 
 
 class PaymentVerificationSerializer(serializers.Serializer):

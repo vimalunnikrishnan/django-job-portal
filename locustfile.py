@@ -1,5 +1,6 @@
 import os
-from locust import HttpUser, task, between
+
+from locust import HttpUser, between, task
 
 
 class JobPortalUser(HttpUser):

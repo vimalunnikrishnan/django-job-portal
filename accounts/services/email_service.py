@@ -1,5 +1,5 @@
-from django.core.mail import send_mail
 from django.conf import settings
+from django.core.mail import send_mail
 from django.utils import timezone
 
 from accounts.models import EmailDeliveryLog
@@ -16,10 +16,7 @@ def send_notification_email(
     notification_type="GENERAL",
     delivery_log=None,
 ):
-    message = render_email_template(
-        template_name,
-        context,
-    )
+
 
     if delivery_log is None:
         delivery_log = EmailDeliveryLog.objects.create(
@@ -33,6 +30,11 @@ def send_notification_email(
         )
 
     try:
+        message = render_email_template(
+                template_name,
+                context,
+            )
+
         delivery_log.attempt_count += 1
         delivery_log.save(
             update_fields=[

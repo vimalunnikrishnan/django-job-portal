@@ -1,46 +1,52 @@
-from django.db.models.functions import TruncDate
+import logging
+
 from django.db.models import Count
+from django.db.models.functions import TruncDate
+from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.throttling import AnonRateThrottle
+from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from django_filters.rest_framework import DjangoFilterBackend
+from jobs.models import Application, Job
 
 from .models import (
-    User,
-    EmployerProfile,
-    CandidateProfile,
     AdminActionLog,
     AuditTrail,
+    CandidateProfile,
+    EmployerProfile,
+    User,
 )
-
-from .services.resume_parser import extract_resume_text
-from .services.resume_nlp import parse_resume
-
 from .permissions import (
     IsAdmin,
-    IsEmployer,
     IsCandidate,
+    IsEmployer,
 )
-
 from .response import success_response
-
 from .serializers import (
-    SignupSerializer,
     EmployerProfileSerializer,
     ResumeUploadSerializer,
+    SignupSerializer,
     UserListSerializer,
 )
+from .services.resume_nlp import parse_resume
+from .services.resume_parser import extract_resume_text
 
-from jobs.models import Job, Application
 
-import logging
+# Add the new class here
+@extend_schema(
+    summary="Refresh JWT access tokens.",
+    description="Generate a new access token using a valid refresh token.",
+)
+class DocumentedTokenRefreshView(TokenRefreshView):
+    pass
+
 
 logger = logging.getLogger("accounts")
 ai_logger = logging.getLogger("ai_events")
@@ -68,6 +74,12 @@ class LoginRateThrottle(AnonRateThrottle):
 class CustomTokenObtainPairView(TokenObtainPairView):
     throttle_classes = [LoginRateThrottle]
 
+    @extend_schema(
+        summary="Authenticate a user and obtain JWT tokens.",
+        description="Authenticate a user and obtain JWT access and refresh tokens.",
+        responses={200: dict, 401: dict},
+        tags=["Authentication"],
+    )
     def post(self, request, *args, **kwargs):
         # Keep your existing method implementation unchanged
         try:
@@ -90,6 +102,13 @@ class SignupAPIView(APIView):
 
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Register a new user account.",
+        request=SignupSerializer,
+        responses={201: dict, 400: dict},
+        description="Register a new user account.",
+        tags=["Authentication"],
+    )
     def post(self, request):
 
         serializer = SignupSerializer(data=request.data)
@@ -125,6 +144,12 @@ class ProfileAPIView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Retrieve the authenticated user's profile.",
+        responses={200: dict},
+        description="Retrieve the authenticated user's profile.",
+        tags=["User Profile"],
+    )
     def get(self, request):
 
         user = request.user
@@ -147,6 +172,13 @@ class EmployerProfileAPIView(APIView):
 
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+        summary="Create or update the employer company profile.",
+        request=EmployerProfileSerializer,
+        responses={201: EmployerProfileSerializer, 400: dict},
+        description="Create an employer profile for the authenticated employer.",
+        tags=["Employer Profile"],
+    )
     def post(self, request):
 
         if EmployerProfile.objects.filter(user=request.user).exists():
@@ -188,6 +220,21 @@ class ResumeUploadAPIView(APIView):
 
     permission_classes = [IsCandidate]
 
+    @extend_schema(
+        summary="Upload and analyze a candidate resume.",
+        request=ResumeUploadSerializer,
+        responses={
+            200: dict,
+            400: dict,
+            404: dict,
+            500: dict,
+        },
+        description=(
+            "Upload a PDF or DOCX resume (maximum 5 MB). "
+            "The system extracts text and performs AI resume analysis."
+        ),
+        tags=["Resume Management"],
+    )
     def post(self, request):
 
         try:
@@ -315,6 +362,17 @@ class EmployerDashboardAPIView(APIView):
 
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+        summary="Retrieve the employer dashboard.",
+        responses={
+            200: dict,
+        },
+        description=(
+            "Retrieve the employer dashboard with the authenticated "
+            "user's ID, email, and role."
+        ),
+        tags=["Employer Dashboard"],
+    )
     def get(self, request):
 
         return success_response(
@@ -332,6 +390,20 @@ class EmployerApprovalAPIView(APIView):
 
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        summary="Approve an employer account.",
+        request=None,
+        responses={
+            200: dict,
+            400: dict,
+            404: dict,
+        },
+        description=(
+            "Approve an employer profile using its user ID. "
+            "Returns an error if the profile is not found or is already approved."
+        ),
+        tags=["Employer Management"],
+    )
     def patch(self, request, user_id):
 
         try:
@@ -403,6 +475,21 @@ class UserBlockAPIView(APIView):
 
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        summary="Block a user account.",
+        request=None,
+        responses={
+            200: dict,
+            400: dict,
+            404: dict,
+        },
+        description=(
+            "Block a user account using its user ID. "
+            "An administrator cannot block their own account or "
+            "block an account that is already blocked."
+        ),
+        tags=["User Management"],
+    )
     def patch(self, request, user_id):
 
         try:
@@ -485,6 +572,20 @@ class UserUnblockAPIView(APIView):
 
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        summary="Unblock a user account.",
+        request=None,
+        responses={
+            200: dict,
+            400: dict,
+            404: dict,
+        },
+        description=(
+            "Unblock a user account using its user ID. "
+            "Returns an error if the user is not found or is already active."
+        ),
+        tags=["User Management"],
+    )
     def patch(self, request, user_id):
 
         try:
@@ -554,6 +655,17 @@ class CandidateDashboardAPIView(APIView):
 
     permission_classes = [IsCandidate]
 
+    @extend_schema(
+        summary="Retrieve the candidate dashboard.",
+        responses={
+            200: dict,
+        },
+        description=(
+            "Retrieve the candidate dashboard with the authenticated "
+            "user's ID, email, and role."
+        ),
+        tags=["Candidate Dashboard"],
+    )
     def get(self, request):
 
         return success_response(
@@ -571,6 +683,15 @@ class AdminDashboardAPIView(APIView):
 
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+    summary="Retrieve the admin dashboard.",
+    responses={200: dict},
+    description=(
+        "Retrieve platform-wide user, job, and application "
+        "statistics for administrators."
+    ),
+    tags=["Admin Dashboard"],
+    )
     def get(self, request):
 
         total_users = User.objects.count()
@@ -641,6 +762,15 @@ class AdminUserGrowthAPIView(APIView):
 
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+    summary="Retrieve daily user growth statistics.",
+    responses={200: dict},
+    description=(
+        "Retrieve daily user registration statistics, "
+        "grouped by creation date."
+    ),
+    tags=["Admin Analytics"],
+    )
     def get(self, request):
 
         growth = (
@@ -663,6 +793,15 @@ class AdminUserGrowthAPIView(APIView):
 class AdminJobActivityAPIView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+    summary="Retrieve job activity statistics.",
+    responses={200: dict},
+    description=(
+        "Retrieve job activity statistics, including total, active, "
+        "inactive, open, and closed jobs, with a breakdown by job type."
+    ),
+    tags=["Admin Analytics"],
+    )
     def get(self, request):
         total_jobs = Job.objects.count()
         active_jobs = Job.objects.filter(is_active=True).count()
@@ -695,6 +834,21 @@ class AdminUserFlagAPIView(APIView):
 
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        summary="Flag a user account for administrative review.",
+        request=None,
+        responses={
+            200: dict,
+            400: dict,
+            404: dict,
+        },
+        description=(
+            "Flag a user account using its user ID. "
+            "An administrator cannot flag their own account or "
+            "flag a user who is already flagged."
+        ),
+        tags=["User Management"],
+    )
     def patch(self, request, user_id):
 
         try:
@@ -772,7 +926,14 @@ class AdminUserFlagAPIView(APIView):
             status_code=status.HTTP_200_OK,
         )
 
-   
+
+@extend_schema(
+    summary="Retrieve and filter user accounts.",
+    description=(
+        "Retrieve user accounts with optional role and verification "
+        "filters, searching, and ordering. Admin access required."
+    ),
+)
 class UserListAPIView(ListAPIView):
 
     permission_classes = [IsAdmin]
@@ -804,6 +965,15 @@ class UserListAPIView(ListAPIView):
 class AdminAuditLogListAPIView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+    summary="Retrieve administrative audit logs.",
+    responses={200: dict},
+    description=(
+        "Retrieve administrator audit logs, including the admin, "
+        "action, target user, target job, reason, and creation time."
+    ),
+    tags=["Admin Audit Logs"],
+    )
     def get(self, request):
 
         logs = AdminActionLog.objects.select_related(
@@ -846,6 +1016,16 @@ class AdminAuditLogListAPIView(APIView):
 class AuditTrailListAPIView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+    summary="Retrieve system audit trail records.",
+    responses={200: dict},
+    description=(
+        "Keep the original beginning of the description here, "
+        "records, including actor, category, action, "
+        "description, metadata, IP address, and timestamp."
+    ),
+    tags=["Admin Audit Logs"],
+    )
     def get(self, request):
         logs = AuditTrail.objects.select_related("actor").all()[:100]
 

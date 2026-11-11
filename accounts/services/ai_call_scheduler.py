@@ -1,5 +1,4 @@
-from datetime import datetime, time, timedelta
-
+from datetime import time, timedelta
 
 AI_CALL_START_TIME = time(9, 0)
 AI_CALL_END_TIME = time(18, 0)

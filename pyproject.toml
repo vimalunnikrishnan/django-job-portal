@@ -1,0 +1,10 @@
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+exclude = [
+    "*/migrations/*.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["RUF012"]

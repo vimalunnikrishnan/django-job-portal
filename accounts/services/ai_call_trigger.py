@@ -1,7 +1,6 @@
+from django.db import DatabaseError
 from django.utils import timezone
-
-from jobs.services.ai_interview_service import create_ai_interview
-from jobs.tasks import start_ai_interview_task
+from kombu.exceptions import OperationalError
 
 from accounts.services.ai_call_eligibility import (
     check_ai_call_eligibility,
@@ -9,6 +8,9 @@ from accounts.services.ai_call_eligibility import (
 from accounts.services.ai_call_scheduler import (
     get_next_ai_call_time,
 )
+from jobs.models import AIInterview
+from jobs.services.ai_interview_service import create_ai_interview
+from jobs.tasks import start_ai_interview_task
 
 
 def trigger_ai_call(
@@ -45,10 +47,26 @@ def trigger_ai_call(
 
     scheduled_time = get_next_ai_call_time(timezone.now())
 
-    task = start_ai_interview_task.apply_async(
-        args=[interview.id],
-        eta=scheduled_time,
-    )
+    try:
+        task = start_ai_interview_task.apply_async(
+            args=[interview.id],
+            eta=scheduled_time,
+        )
+    except (OperationalError, TimeoutError, ConnectionError) as exc:
+        try:
+            AIInterview.objects.filter(
+                id=interview.id,
+                status="PENDING",
+            ).update(status="FAILED")
+        except DatabaseError:
+            pass
+
+        return {
+            "triggered": False,
+            "eligibility": eligibility,
+            "interview_id": interview.id,
+            "message": f"Failed to schedule AI interview: {exc}",
+        }
 
     return {
         "triggered": True,

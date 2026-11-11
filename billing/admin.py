@@ -1,10 +1,11 @@
 
 from django.contrib import admin
+
 from .models import (
+    BillingHistory,
+    PaymentTransaction,
     SubscriptionPlan,
     UserSubscription,
-    PaymentTransaction,
-    BillingHistory,
 )
 
 

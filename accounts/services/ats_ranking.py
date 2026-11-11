@@ -1,4 +1,3 @@
-from accounts.models import CandidateProfile
 from accounts.services.ats_scoring import calculate_and_save_ats_score
 from jobs.models import Application
 
@@ -6,20 +5,20 @@ from jobs.models import Application
 def rank_candidates_for_job(job):
     applications = (
         Application.objects
-        .filter(job=job)
-        .select_related("candidate")
+        .filter(
+            job=job,
+            candidate__candidate_profile__is_deleted=False,
+        )
+        .select_related(
+            "candidate",
+            "candidate__candidate_profile",
+        )
     )
 
     ranked_candidates = []
 
     for application in applications:
-        try:
-            candidate_profile = CandidateProfile.objects.get(
-                user=application.candidate,
-                is_deleted=False,
-            )
-        except CandidateProfile.DoesNotExist:
-            continue
+        candidate_profile = application.candidate.candidate_profile
 
         ats_score = calculate_and_save_ats_score(
             job,

@@ -1,25 +1,25 @@
 from django.urls import path
 
-from rest_framework_simplejwt.views import TokenRefreshView
+from accounts.views import DocumentedTokenRefreshView
 
 from .views import (
-    AuditTrailListAPIView,
-    CustomTokenObtainPairView,
-    SignupAPIView,
-    ProfileAPIView,
-    UserListAPIView,
-    EmployerDashboardAPIView,
-    EmployerProfileAPIView,
-    CandidateDashboardAPIView,
-    ResumeUploadAPIView,
+    AdminAuditLogListAPIView,
     AdminDashboardAPIView,
-    EmployerApprovalAPIView,
-    UserBlockAPIView,
-    UserUnblockAPIView,
-    AdminUserGrowthAPIView,
     AdminJobActivityAPIView,
     AdminUserFlagAPIView,
-    AdminAuditLogListAPIView,
+    AdminUserGrowthAPIView,
+    AuditTrailListAPIView,
+    CandidateDashboardAPIView,
+    CustomTokenObtainPairView,
+    EmployerApprovalAPIView,
+    EmployerDashboardAPIView,
+    EmployerProfileAPIView,
+    ProfileAPIView,
+    ResumeUploadAPIView,
+    SignupAPIView,
+    UserBlockAPIView,
+    UserListAPIView,
+    UserUnblockAPIView,
 )
 
 urlpatterns = [
@@ -27,7 +27,11 @@ urlpatterns = [
     # Authentication APIs
     path("signup/", SignupAPIView.as_view(), name="signup"),
     path("login/", CustomTokenObtainPairView.as_view(), name="login"),
-    path("refresh/", TokenRefreshView.as_view(), name="refresh"),
+    path(
+        "refresh/",
+        DocumentedTokenRefreshView.as_view(),
+        name="refresh",
+    ),
 
     # User Profile
     path("profile/", ProfileAPIView.as_view(), name="profile"),

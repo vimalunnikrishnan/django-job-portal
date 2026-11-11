@@ -1,30 +1,44 @@
-﻿from datetime import timedelta
-
+﻿import os
+from datetime import timedelta
 from unittest.mock import Mock, patch
 
+from django.core.cache import cache
+from django.core.files.storage import FileSystemStorage
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from accounts.models import CandidateProfile, User
+from accounts.services.ai_call_trigger import trigger_ai_call
 from billing.models import (
     CandidateProfileAccess,
     SubscriptionPlan,
     UserSubscription,
 )
-
-from django.core.cache import cache
-from django.core.serializers import python
-from jobs.models import Application, Job, AIInterview, AIInterviewSession, AIQuestion, AIAnswer, QuestionTemplate, JobQuestionMapping, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
-from django.test import TestCase
-from django.utils import timezone
-from rest_framework import status
-from rest_framework.test import APITestCase
-from django.core.files.uploadedfile import SimpleUploadedFile
-from accounts.models import User, CandidateProfile
+from jobs.models import (
+    AIAnswer,
+    AIAnswerEvaluation,
+    AIInterview,
+    AIInterviewSession,
+    AIQuestion,
+    Application,
+    CallLog,
+    InterviewAvailability,
+    InterviewReminder,
+    InterviewSchedule,
+    Job,
+    JobQuestionMapping,
+    QuestionTemplate,
+)
 from jobs.services.ai_bridge.base import AIRateLimitError
 from jobs.services.ai_bridge.service import AIBridgeService
 from jobs.services.ai_question_engine.engine import AIQuestionEngine
-from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
 from jobs.services.interview_reminder_service import InterviewReminderService
-from jobs.services.ai_bridge.service import AIBridgeService
+from jobs.services.reports.candidate_report_service import CandidateReportService
 from jobs.tasks import start_ai_interview_task
-from jobs.models import CallLog
+
 
 class JobCreationAPITest(APITestCase):
 
@@ -113,12 +127,26 @@ class JobCreationAPITest(APITestCase):
 
 
     def test_candidate_can_apply_with_resume(self):
-        from django.core.files.uploadedfile import SimpleUploadedFile
 
         resume = SimpleUploadedFile(
             "resume.pdf",
             b"Test resume content",
             content_type="application/pdf",
+        )
+
+        resume_field = CandidateProfile._meta.get_field("resume")
+        original_storage = resume_field.storage
+
+        storage = FileSystemStorage(
+            location=os.path.join(os.getcwd(), "test_media")
+        )
+        resume_field.storage = storage
+
+        self.addCleanup(
+            setattr,
+            resume_field,
+            "storage",
+            original_storage,
         )
 
         self.candidate_profile.resume = resume
@@ -395,7 +423,9 @@ class AIQuestionEngineTest(TestCase):
                 order=1,
             ),
             QuestionTemplate.objects.create(
-                question="How many years of software development experience do you have?",
+                question=(
+                    "How many years of software development experience do you have?"
+                ),
                 category="EXPERIENCE",
                 order=2,
             ),
@@ -484,6 +514,27 @@ class AIQuestionEngineTest(TestCase):
         self.assertTrue(
             self.engine.is_interview_complete()
         )
+
+    def test_positive_answer_triggers_follow_up(self):
+        follow_up = QuestionTemplate.objects.create(
+            question="Can you explain your experience in more detail?",
+            category="EXPERIENCE",
+            order=6,
+        )
+
+        self.templates[0].follow_up_question = follow_up
+        self.templates[0].save(update_fields=["follow_up_question"])
+
+        question = self.engine.get_next_question()
+
+        result = self.engine.process_answer(
+            question,
+            "Yes",
+        )
+
+        self.assertEqual(result["action"], "FOLLOW_UP")
+        self.assertEqual(result["question"], follow_up.question)
+        self.assertEqual(self.session.current_question_index, 0)
 
 
 class AIAnswerEvaluationAPITest(APITestCase):
@@ -1022,10 +1073,6 @@ class InterviewReminderServiceTest(TestCase):
         self.assertNotIn(reminder.id, retryable_ids)
 
 
-
-from jobs.services.reports.candidate_report_service import CandidateReportService
-
-
 class CandidateReportServiceTest(TestCase):
     def setUp(self):
         self.employer = User.objects.create_user(
@@ -1116,10 +1163,6 @@ class CandidateReportServiceTest(TestCase):
 
         self.assertIsNone(report)
 
-
-
-from rest_framework.test import APITestCase
-from rest_framework import status
 
 class CandidateReportAPITest(APITestCase):
     def setUp(self):
@@ -1710,3 +1753,70 @@ class JobCandidateRankingAccessLimitTest(APITestCase):
             responses[-1].status_code,
             status.HTTP_429_TOO_MANY_REQUESTS,
         )
+
+
+class AIInterviewTriggerServiceTest(TestCase):
+
+    def setUp(self):
+        self.candidate = User.objects.create_user(
+            username="trigger_candidate",
+            email="trigger_candidate@example.com",
+            password="TestPassword123",
+            role="CANDIDATE",
+        )
+
+        self.employer = User.objects.create_user(
+            username="trigger_employer",
+            email="trigger_employer@example.com",
+            password="TestPassword123",
+            role="EMPLOYER",
+        )
+
+        self.job = Job.objects.create(
+            employer=self.employer,
+            title="Python Developer",
+            description="Python backend development",
+            skills="Python, Django",
+            experience=1,
+            min_salary=25000,
+            max_salary=45000,
+            location="Kochi",
+            job_type="FULL_TIME",
+            status="OPEN",
+            is_active=True,
+        )
+
+        self.application = Application.objects.create(
+            candidate=self.candidate,
+            job=self.job,
+            status="SHORTLISTED",
+        )
+
+        CandidateProfile.objects.filter(
+            user=self.candidate
+        ).update(is_available_for_ai_interview=True)
+
+    @patch(
+        "accounts.services.ai_call_trigger.start_ai_interview_task.apply_async"
+    )
+    def test_broker_failure_marks_interview_failed(self, mock_apply_async):
+        from kombu.exceptions import OperationalError
+
+        mock_apply_async.side_effect = OperationalError(
+            "Broker unavailable"
+        )
+
+        result = trigger_ai_call(
+            application=self.application,
+            match_percentage=85,
+            shortlist_threshold=70,
+        )
+
+        interview = AIInterview.objects.get(
+            application=self.application
+        )
+
+        self.assertFalse(result["triggered"])
+        self.assertEqual(interview.status, "FAILED")
+        self.assertEqual(result["interview_id"], interview.id)
+        self.assertIn("Failed to schedule", result["message"])

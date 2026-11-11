@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class AIRateLimitError(Exception):
     """Raised when an AI provider rate limit is exceeded."""
     

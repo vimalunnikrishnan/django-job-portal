@@ -10,6 +10,7 @@ def auto_process_applications(
         .filter(status="APPLIED")
         .select_related(
             "candidate",
+            "candidate__candidate_profile",
             "job",
         )
     )
@@ -17,11 +18,20 @@ def auto_process_applications(
     results = []
 
     for application in applications:
-        result = auto_process_application(
-            application,
-            shortlist_threshold=shortlist_threshold,
-        )
+        try:
+            result = auto_process_application(
+                application,
+                shortlist_threshold=shortlist_threshold,
+            )
+            results.append(result)
 
-        results.append(result)
+        except Exception as exc:
+            results.append(
+                {
+                    "application": application,
+                    "success": False,
+                    "error": str(exc),
+                }
+            )
 
     return results

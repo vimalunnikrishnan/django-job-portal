@@ -1,10 +1,13 @@
+from django.db import transaction
+
+from accounts.services.ats_scoring import calculate_and_save_ats_score
+from accounts.services.eligibility import check_candidate_eligibility
 from accounts.services.notification_service import (
     create_application_notification,
 )
-from accounts.services.ats_scoring import calculate_and_save_ats_score
-from accounts.services.eligibility import check_candidate_eligibility
 
 
+@transaction.atomic
 def auto_process_application(
     application,
     shortlist_threshold=70,

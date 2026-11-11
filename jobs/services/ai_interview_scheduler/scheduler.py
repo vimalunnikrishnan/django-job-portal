@@ -1,15 +1,15 @@
+from django.db import transaction
 from django.utils import timezone
-
-from jobs.models import (
-    InterviewAvailability,
-    InterviewSchedule,
-)
 
 from accounts.services.notification_email_service import (
     send_interview_scheduled_email,
 )
 from accounts.services.notification_service import (
     create_application_notification,
+)
+from jobs.models import (
+    InterviewAvailability,
+    InterviewSchedule,
 )
 
 
@@ -77,34 +77,45 @@ class AIInterviewScheduler:
         ):
             return {
                 "success": False,
-                "error": "This interview slot conflicts with another scheduled interview.",
+                "error": (
+                    "This interview slot conflicts with another "
+                    "scheduled interview."
+                ),
             }
 
-        schedule = InterviewSchedule.objects.create(
-            interview=interview,
-            availability=slot,
-            scheduled_start=slot.start_time,
-            scheduled_end=slot.end_time,
-            status="SCHEDULED",
-        )
+        with transaction.atomic():
+            schedule = InterviewSchedule.objects.create(
+                interview=interview,
+                availability=slot,
+                scheduled_start=slot.start_time,
+                scheduled_end=slot.end_time,
+                status="SCHEDULED",
+            )
 
-        slot.is_available = False
-        slot.save(
-            update_fields=["is_available", "updated_at"]
-        )
+            slot.is_available = False
+            slot.save(
+                update_fields=["is_available", "updated_at"]
+            )
 
-        interview.status = "SCHEDULED"
-        interview.save(
-            update_fields=["status", "updated_at"]
-        )
+            interview.status = "SCHEDULED"
+            interview.save(
+                update_fields=["status", "updated_at"]
+            )
 
-        send_interview_scheduled_email(schedule)
-        create_application_notification(
-            interview.application,
-            "INTERVIEW",
-        )
-        schedule.confirmation_sent = True
-        schedule.save(update_fields=["confirmation_sent", "updated_at"])
+            def send_notifications():
+                send_interview_scheduled_email(schedule)
+
+                create_application_notification(
+                    interview.application,
+                    "INTERVIEW",
+                )
+
+                schedule.confirmation_sent = True
+                schedule.save(
+                    update_fields=["confirmation_sent", "updated_at"]
+                )
+
+            transaction.on_commit(send_notifications)
 
         return {
             "success": True,
@@ -133,36 +144,47 @@ class AIInterviewScheduler:
         ):
             return {
                 "success": False,
-                "error": "The new interview slot conflicts with another scheduled interview.",
+                "error": (
+                    "The new interview slot conflicts with another "
+                    "scheduled interview."
+                ),
             }
 
-        old_slot = schedule.availability
+        with transaction.atomic():
+            old_slot = schedule.availability
 
-        if old_slot:
-            old_slot.is_available = True
-            old_slot.save(
+            if old_slot:
+                old_slot.is_available = True
+                old_slot.save(
+                    update_fields=["is_available", "updated_at"]
+                )
+
+            schedule.availability = new_slot
+            schedule.scheduled_start = new_slot.start_time
+            schedule.scheduled_end = new_slot.end_time
+            schedule.status = "RESCHEDULED"
+            schedule.confirmation_sent = False
+            schedule.save()
+
+            new_slot.is_available = False
+            new_slot.save(
                 update_fields=["is_available", "updated_at"]
             )
 
-        schedule.availability = new_slot
-        schedule.scheduled_start = new_slot.start_time
-        schedule.scheduled_end = new_slot.end_time
-        schedule.status = "RESCHEDULED"
-        schedule.confirmation_sent = False
-        schedule.save()
+            def send_notifications():
+                send_interview_scheduled_email(schedule)
 
-        new_slot.is_available = False
-        new_slot.save(
-            update_fields=["is_available", "updated_at"]
-        )
+                create_application_notification(
+                    schedule.interview.application,
+                    "INTERVIEW",
+                )
 
-        send_interview_scheduled_email(schedule)
-        create_application_notification(
-            schedule.interview.application,
-            "INTERVIEW",
-        )
-        schedule.confirmation_sent = True
-        schedule.save(update_fields=["confirmation_sent", "updated_at"])
+                schedule.confirmation_sent = True
+                schedule.save(
+                    update_fields=["confirmation_sent", "updated_at"]
+                )
+
+            transaction.on_commit(send_notifications)
 
         return {
             "success": True,

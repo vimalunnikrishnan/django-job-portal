@@ -1,20 +1,13 @@
-from datetime import datetime, timedelta
-from django.core.mail import message
-from django.db.migrations import serializer
-from django.utils import timezone
+import logging
+from datetime import timedelta
+
 from django.core.cache import cache
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from django.shortcuts import get_object_or_404
-
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
-
-import logging
-
-logger = logging.getLogger("jobs")
-ai_logger = logging.getLogger("ai_events")
-
-from requests import request
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.filters import (
     OrderingFilter,
@@ -29,34 +22,72 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.throttles import PremiumRecruiterRateThrottle
-from billing.services import can_access_candidate
-from billing.services import get_active_subscription
-from billing.services import can_create_job
 from accounts.models import AdminActionLog, CandidateProfile
-from accounts.permissions import IsEmployer, IsCandidate, IsAdmin
+from accounts.permissions import IsAdmin, IsCandidate, IsEmployer
 from accounts.response import success_response
-from accounts.services.ats_scoring import calculate_and_save_ats_score
 from accounts.services.ats_ranking import rank_candidates_for_job
+from accounts.services.ats_scoring import calculate_and_save_ats_score
 from accounts.services.auto_shortlisting import auto_process_application
-from jobs.services.ai_interview_service import create_ai_interview
+from billing.services import (
+    can_access_candidate,
+    can_create_job,
+    get_active_subscription,
+)
+from billing.throttles import PremiumRecruiterRateThrottle
 from jobs.services.ai_answer_evaluation.scoring import AnswerScoringEngine
 from jobs.services.ai_interview_scheduler.scheduler import AIInterviewScheduler
+from jobs.services.ai_interview_service import create_ai_interview
 from jobs.services.reports.candidate_report_service import CandidateReportService
 from jobs.tasks import start_ai_interview_task
 
-from .filters import JobFilter
-from .models import Job, Application, SavedJob, ATSScore, AIInterview, AIQuestion, AIAnswerEvaluation, InterviewAvailability, InterviewSchedule, InterviewReminder
-from .serializers import JobSerializer, ApplicationSerializer, ApplicationStatusSerializer, SavedJobSerializer, ATSScoreSerializer, RankedCandidateSerializer, AIAnswerEvaluationSerializer, InterviewAvailabilitySerializer, InterviewScheduleSerializer
 from .constants.application_constants import (
     APPLICATION_STATUS_TRANSITIONS,
 )
+from .filters import JobFilter
+from .models import (
+    AIAnswerEvaluation,
+    AIInterview,
+    AIQuestion,
+    Application,
+    InterviewAvailability,
+    InterviewReminder,
+    InterviewSchedule,
+    Job,
+    SavedJob,
+)
+from .serializers import (
+    AIAnswerEvaluationSerializer,
+    ApplicationSerializer,
+    ApplicationStatusSerializer,
+    ATSScoreSerializer,
+    InterviewAvailabilitySerializer,
+    InterviewScheduleSerializer,
+    JobSerializer,
+    RankedCandidateSerializer,
+    SavedJobSerializer,
+)
+
+logger = logging.getLogger("jobs")
+ai_logger = logging.getLogger("ai_events")
 
 class JobCreateAPIView(APIView):
 
     permission_classes = [IsEmployer]
 
-    
+    @extend_schema(
+    summary="Create a new job posting.",
+    request=JobSerializer,
+    responses={
+        201: dict,
+        400: dict,
+        403: dict,
+    },
+    description=(
+        "Create a new job listing using the authenticated employer's account. "
+        "Job creation is subject to subscription limits."
+    ),
+    tags=["Job Management"],
+    )
     def post(self, request):
         allowed, message = can_create_job(request.user)
 
@@ -91,6 +122,13 @@ class JobCreateAPIView(APIView):
         )
 
 
+@extend_schema(
+    summary="Retrieve and filter available job postings.",
+    description=(
+        "Retrieve active job postings with filtering, searching, "
+        "ordering, and pagination."
+    ),
+)
 class JobListAPIView(ListAPIView):
 
     permission_classes = [IsAuthenticated]
@@ -146,6 +184,10 @@ class JobListAPIView(ListAPIView):
         return response
 
 
+@extend_schema(
+    summary="Retrieve job posting details.",
+    description="Retrieve the details of an active job posting using its ID.",
+)
 class JobDetailAPIView(RetrieveAPIView):
 
     permission_classes = [IsAuthenticated]
@@ -159,6 +201,13 @@ class JobDetailAPIView(RetrieveAPIView):
     )
 
 
+@extend_schema(
+    summary="Update an existing job posting.",
+    description=(
+        "Update a job posting owned by the authenticated employer. "
+        "Supports PUT and PATCH requests."
+    ),
+)
 class JobUpdateAPIView(UpdateAPIView):
 
     permission_classes = [IsEmployer]
@@ -179,6 +228,15 @@ class JobDeleteAPIView(APIView):
 
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+    summary="Deactivate an existing job posting.",
+    responses={200: dict},
+    description=(
+        "Deactivate an active job listing owned by the authenticated employer. "
+        "This is a soft delete; the job record remains in the database."
+    ),
+    tags=["Job Management"],
+    )
     def delete(self, request, pk):
 
         job = get_object_or_404(
@@ -197,6 +255,10 @@ class JobDeleteAPIView(APIView):
         )
 
 
+@extend_schema(
+    summary="Retrieve featured job postings.",
+    description="Retrieve active job postings marked as featured.",
+)
 class FeaturedJobListAPIView(ListAPIView):
 
     permission_classes = [IsAuthenticated]
@@ -213,6 +275,10 @@ class FeaturedJobListAPIView(ListAPIView):
     )
 
 
+@extend_schema(
+    summary="Retrieve the latest job postings.",
+    description="Retrieve the latest active job postings, ordered by creation date.",
+)
 class LatestJobListAPIView(ListAPIView):
 
     permission_classes = [IsAuthenticated]
@@ -232,6 +298,21 @@ class ApplyJobAPIView(APIView):
 
     permission_classes = [IsCandidate]
 
+    @extend_schema(
+        summary="Submit an application for a job.",
+        request=None,
+        responses={
+            201: dict,
+            400: dict,
+            404: dict,
+        },
+        description=(
+            "Apply for an active and open job using its ID. "
+            "The candidate must have a profile and uploaded resume, "
+            "and must not have already applied."
+        ),
+        tags=["Job Applications"],
+    )
     def post(self, request, pk):
 
         job = get_object_or_404(
@@ -308,11 +389,24 @@ class ApplyJobAPIView(APIView):
 class InterviewAvailabilityAPIView(APIView):
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+    summary="Create employer interview availability.",
+    request=InterviewAvailabilitySerializer,
+    responses={
+        201: dict,
+        400: dict,
+    },
+    description=(
+        "Create an interview availability slot for a job owned "
+        "by the authenticated employer."
+    ),
+    tags=["Interview Management"],
+    )
     def post(self, request):
         serializer = InterviewAvailabilitySerializer(data=request.data)
 
         if serializer.is_valid():
-            job = get_object_or_404(
+            _ = get_object_or_404(
                 Job,
                 pk=serializer.validated_data["job"].id,
                 employer=request.user,
@@ -342,6 +436,30 @@ class InterviewAvailabilityAPIView(APIView):
 class InterviewScheduleAPIView(APIView):
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+    summary="Schedule an interview using employer availability.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "interview_id": {"type": "integer"},
+                "availability_id": {"type": "integer"},
+            },
+            "required": ["interview_id", "availability_id"],
+        }
+    },
+    responses={
+        201: dict,
+        400: dict,
+        403: dict,
+    },
+    description=(
+        "Schedule an AI interview using an interview ID and an "
+        "availability slot ID. Only the employer who owns the job "
+        "can schedule the interview."
+    ),
+    tags=["Interview Management"],
+    )
     def post(self, request):
         interview_id = request.data.get("interview_id")
         availability_id = request.data.get("availability_id")
@@ -373,7 +491,10 @@ class InterviewScheduleAPIView(APIView):
                     "success": False,
                     "status_code": status.HTTP_403_FORBIDDEN,
                     "errors": {
-                        "detail": "You do not have permission to schedule this interview."
+                        "detail": (
+                            "You do not have permission to schedule"
+                            "this interview."
+                        )
                     },
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -416,6 +537,29 @@ class InterviewScheduleAPIView(APIView):
 class InterviewRescheduleAPIView(APIView):
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+    summary="Reschedule an existing interview.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "schedule_id": {"type": "integer"},
+                "availability_id": {"type": "integer"},
+            },
+            "required": ["schedule_id", "availability_id"],
+        }
+    },
+    responses={
+        200: dict,
+        400: dict,
+        403: dict,
+    },
+    description=(
+        "Reschedule an existing interview using a new availability slot. "
+        "Only the employer who owns the associated job can reschedule it."
+    ),
+    tags=["Interview Management"],
+    )
     def post(self, request):
         schedule_id = request.data.get("schedule_id")
         availability_id = request.data.get("availability_id")
@@ -495,6 +639,23 @@ class AIInterviewAPIView(APIView):
 
     permission_classes = [IsCandidate]
 
+    @extend_schema(
+        summary="Start an AI interview for a shortlisted application.",
+        request=None,
+        responses={
+            200: dict,
+            202: dict,
+            400: dict,
+            404: dict,
+            503: dict,
+        },
+        description=(
+            "Start AI interview processing for a shortlisted application. "
+            "Returns the existing interview if one is already created. "
+            "Interview processing is dispatched asynchronously using Celery."
+        ),
+        tags=["AI Interviews"],
+    )
     def post(self, request, pk):
 
         application = get_object_or_404(
@@ -572,6 +733,10 @@ class AIInterviewAPIView(APIView):
         )
 
 
+@extend_schema(
+    summary="Retrieve the authenticated candidate's applications.",
+    description="Retrieve job applications submitted by the authenticated candidate.",
+)
 class MyApplicationsAPIView(ListAPIView):
 
     permission_classes = [IsCandidate]
@@ -579,6 +744,9 @@ class MyApplicationsAPIView(ListAPIView):
     serializer_class = ApplicationSerializer
 
     def get_queryset(self):
+
+        if getattr(self, "swagger_fake_view", False):
+            return Application.objects.none()
 
         return Application.objects.select_related(
             "job",
@@ -590,24 +758,13 @@ class MyApplicationsAPIView(ListAPIView):
         )
 
 
-class MyApplicationsAPIView(ListAPIView):
-
-    permission_classes = [IsCandidate]
-
-    serializer_class = ApplicationSerializer
-
-    def get_queryset(self):
-
-        return Application.objects.select_related(
-            "job",
-            "candidate",
-        ).filter(
-            candidate=self.request.user,
-        ).order_by(
-            "-applied_at"
-        )
-
-        
+@extend_schema(
+    summary="Retrieve applications received by an employer.",
+    description=(
+        "Retrieve applications for jobs posted by the authenticated employer, "
+        "with optional status and search filters."
+    ),
+)
 class EmployerApplicationsAPIView(ListAPIView):
 
     permission_classes = [IsEmployer]
@@ -615,6 +772,9 @@ class EmployerApplicationsAPIView(ListAPIView):
     serializer_class = ApplicationSerializer
 
     def get_queryset(self):
+
+        if getattr(self, "swagger_fake_view", False):
+            return Application.objects.none()
 
         queryset = Application.objects.select_related(
             "job",
@@ -649,6 +809,20 @@ class EmployerAnalyticsAPIView(APIView):
     throttle_classes = [PremiumRecruiterRateThrottle]
     throttle_scope = "premium_recruiter"
 
+    @extend_schema(
+    summary="Retrieve employer job and application analytics.",
+    responses={
+        200: dict,
+        403: dict,
+    },
+    description=(
+        "Retrieve premium employer analytics, including job statistics, "
+        "application counts, conversion ratios, job performance, and "
+        "daily application trends for the latest seven days. "
+        "Requires an active subscription with analytics access."
+    ),
+    tags=["Employer Analytics"],
+    )
     def get(self, request):
         employer = request.user
 
@@ -664,7 +838,10 @@ class EmployerAnalyticsAPIView(APIView):
                     "status_code": status.HTTP_403_FORBIDDEN,
                     "errors": {
                         "subscription": [
-                            "Premium analytics requires an active Enterprise subscription."
+                            (
+                                "Premium analytics requires an active "
+                                "Enterprise subscription."
+                            )
                         ]
                     },
                 },
@@ -881,6 +1058,21 @@ class ApplicationStatusUpdateAPIView(APIView):
     permission_classes = [IsEmployer]
 
 
+    @extend_schema(
+    summary="Update a job application's status.",
+    request=ApplicationStatusSerializer,
+    responses={
+        200: dict,
+        400: dict,
+        403: dict,
+    },
+    description=(
+        "Update an application status using its ID. "
+        "Only the employer who owns the associated job can update it. "
+        "Status changes must follow the permitted application transitions."
+    ),
+    tags=["Job Applications"],
+    )
     def patch(self, request, pk):
 
         application = get_object_or_404(
@@ -920,7 +1112,10 @@ class ApplicationStatusUpdateAPIView(APIView):
                         "success": False,
                         "status_code": status.HTTP_400_BAD_REQUEST,
                         "errors": {
-                            "detail": f"Cannot move from {current_status} to {new_status}."
+                            "detail": (
+                                f"Cannot move from {current_status} "
+                                f"to {new_status}."
+                            )
                         },
                     },
                     status=status.HTTP_400_BAD_REQUEST,
@@ -951,6 +1146,32 @@ class ApplicationStatusUpdateAPIView(APIView):
 class AutoProcessApplicationAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+    summary="Automatically process a job application.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "shortlist_threshold": {
+                    "type": "number",
+                    "default": 70,
+                },
+            },
+        }
+    },
+    responses={
+        200: dict,
+        400: dict,
+        403: dict,
+        404: dict,
+    },
+    description=(
+        "Automatically process an application using its ATS match score "
+        "and shortlist threshold. Only the employer who owns the job "
+        "can process the application."
+    ),
+    tags=["Application Processing"],
+    )
     def post(self, request, pk):
         application = get_object_or_404(
             Application,
@@ -990,7 +1211,10 @@ class AutoProcessApplicationAPIView(APIView):
                     "success": False,
                     "status_code": status.HTTP_403_FORBIDDEN,
                     "errors": {
-                        "detail": "You do not have permission to process this application."
+                        "detail": (
+                            "You do not have permission to process this "
+                            "application."
+                        )
                     },
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -1044,6 +1268,20 @@ class SaveJobAPIView(APIView):
 
     permission_classes = [IsCandidate]
 
+    @extend_schema(
+        summary="Save a job posting to the candidate's saved jobs.",
+        request=None,
+        responses={
+            201: dict,
+            400: dict,
+            404: dict,
+        },
+        description=(
+            "Save an active job listing to the authenticated candidate's "
+            "saved jobs. Returns an error if the job is already saved."
+        ),
+        tags=["Saved Jobs"],
+    )
     def post(self, request, pk):
 
         job = get_object_or_404(
@@ -1085,22 +1323,10 @@ class SaveJobAPIView(APIView):
         )
 
 
-class SavedJobListAPIView(ListAPIView):
-
-    permission_classes = [IsCandidate]
-
-    serializer_class = ApplicationSerializer
-
-    def get_queryset(self):
-        return SavedJob.objects.select_related(
-            "job",
-        ).filter(
-            candidate=self.request.user,
-        ).order_by(
-            "-saved_at"
-        )
-
-
+@extend_schema(
+    summary="Retrieve the candidate's saved jobs.",
+    description="Retrieve saved job postings belonging to the authenticated candidate.",
+)
 class SavedJobListAPIView(ListAPIView):
 
     permission_classes = [IsCandidate]
@@ -1108,6 +1334,10 @@ class SavedJobListAPIView(ListAPIView):
     serializer_class = SavedJobSerializer
 
     def get_queryset(self):
+
+        if getattr(self, "swagger_fake_view", False):
+            return SavedJob.objects.none()
+
         return SavedJob.objects.select_related(
             "job",
         ).filter(
@@ -1121,6 +1351,15 @@ class UnsaveJobAPIView(APIView):
 
     permission_classes = [IsCandidate]
 
+    @extend_schema(
+    summary="Remove a job from the candidate's saved jobs.",
+    responses={200: dict, 404: dict},
+    description=(
+        "Remove a job from the authenticated candidate's saved jobs "
+        "using the job ID."
+    ),
+    tags=["Saved Jobs"],
+    )
     def delete(self, request, pk):
 
         saved_job = get_object_or_404(
@@ -1141,6 +1380,28 @@ class AdminJobDeactivateAPIView(APIView):
 
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+    summary="Deactivate a job posting through admin moderation.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "moderation_reason": {"type": "string"},
+            },
+            "required": ["moderation_reason"],
+        }
+    },
+    responses={
+        200: dict,
+        400: dict,
+        404: dict,
+    },
+    description=(
+        "Deactivate a job listing using its ID. "
+        "Administrators must provide a moderation reason."
+    ),
+    tags=["Admin Job Management"],
+    )
     def patch(self, request, pk):
 
         job = get_object_or_404(
@@ -1204,6 +1465,18 @@ class JobMatchPercentageAPIView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+    summary="Calculate the candidate's job match percentage.",
+    responses={
+        200: dict,
+        404: dict,
+    },
+    description=(
+        "Calculate the authenticated candidate's ATS match score "
+        "for an active job listing and return the serialized score."
+    ),
+    tags=["Job Matching"],
+    )
     def get(self, request, pk):
 
         job = get_object_or_404(
@@ -1252,6 +1525,21 @@ class JobCandidateRankingAPIView(APIView):
     throttle_classes = [PremiumRecruiterRateThrottle]
     throttle_scope = "premium_recruiter"
 
+    @extend_schema(
+    summary="Retrieve ranked candidates for a job.",
+    responses={
+        200: dict,
+        403: dict,
+        404: dict,
+    },
+    description=(
+        "Retrieve ranked candidates for an active job owned by the "
+        "authenticated employer. Includes candidate details, application "
+        "status, skill, experience and education scores, and match percentage. "
+        "Subject to premium recruiter throttling and candidate-access limits."
+    ),
+    tags=["Job Matching"],
+    )
     def get(self, request, pk):
         job = get_object_or_404(
             Job,
@@ -1277,7 +1565,10 @@ class JobCandidateRankingAPIView(APIView):
                     "success": False,
                     "status_code": status.HTTP_403_FORBIDDEN,
                     "errors": {
-                        "detail": "You do not have permission to view this job's candidates."
+                        "detail": (
+                            "You do not have permission to view this "
+                            "job's candidates."
+                        )
                     },
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -1336,6 +1627,28 @@ class JobCandidateRankingAPIView(APIView):
 class AIAnswerEvaluationAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+    summary="Evaluate a candidate's AI interview answer.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "answer_text": {"type": "string"},
+            },
+            "required": ["answer_text"],
+        }
+    },
+    responses={
+        200: AIAnswerEvaluationSerializer,
+        400: dict,
+        404: dict,
+    },
+    description=(
+        "Evaluate a candidate's AI interview answer using relevance, "
+        "completeness, keyword matching, and confidence scoring."
+    ),
+    tags=["AI Interviews"],
+    )
     def post(self, request, question_id):
         question = get_object_or_404(
             AIQuestion,
@@ -1407,6 +1720,19 @@ class AIAnswerEvaluationAPIView(APIView):
 class AIAnswerScoreAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+    summary="Retrieve the evaluation score for an AI interview answer.",
+    responses={
+        200: AIAnswerEvaluationSerializer,
+        404: dict,
+    },
+    description=(
+        "Retrieve the AI evaluation scores for an interview answer, "
+        "including relevance, completeness, keyword matching, "
+        "overall score, and confidence."
+    ),
+    tags=["AI Interviews"],
+    )
     def get(self, request, question_id):
         question = get_object_or_404(
             AIQuestion,
@@ -1442,6 +1768,19 @@ class AIAnswerScoreAPIView(APIView):
 class CandidateReportAPIView(APIView):
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+    summary="Generate a candidate application report.",
+    responses={
+        200: dict,
+        403: dict,
+        404: dict,
+    },
+    description=(
+        "Generate a candidate report for an application owned by the "
+        "authenticated employer. Access is subject to candidate-access limits."
+    ),
+    tags=["Candidate Reports"],
+    )
     def get(self, request, application_id):
         # Generate the report first. The service verifies ownership.
         report = CandidateReportService.generate_report(
@@ -1486,6 +1825,18 @@ class CandidateReportAPIView(APIView):
 class InterviewReminderListAPIView(APIView):
     permission_classes = [IsEmployer]
 
+    @extend_schema(
+        summary="Retrieve interview reminder records.",
+        responses={
+            200: dict,
+        },
+        description=(
+            "Retrieve interview reminder records for the authenticated "
+            "employer, including job title, reminder stage, status, "
+            "attempt count, error message, and timestamps."
+        ),
+        tags=["Interview Reminders"],
+    )
     def get(self, request):
         reminders = InterviewReminder.objects.filter(
             schedule__interview__application__job__employer=request.user,

@@ -1,4 +1,4 @@
-from jobs.models import Application, ATSScore, AIInterview
+from jobs.models import Application, ATSScore
 
 
 class CandidateReportService:
@@ -44,10 +44,15 @@ class CandidateReportService:
         }
 
         # ATS evaluation
-        ats = ATSScore.objects.filter(
-            candidate__user=candidate,
-            job=job,
-        ).first()
+        ats = (
+            ATSScore.objects
+            .select_related("candidate")
+            .filter(
+                candidate__user=candidate,
+                job=job,
+            )
+            .first()
+        )
 
         ats_report = None
 
@@ -61,10 +66,10 @@ class CandidateReportService:
             }
 
         # AI interview evaluation
-        interview = (
-            AIInterview.objects
-            .filter(application=application)
-            .first()
+        interview = getattr(
+            application,
+            "ai_interview",
+            None,
         )
 
         interview_report = None

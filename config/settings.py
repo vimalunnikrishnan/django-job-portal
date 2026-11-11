@@ -1,9 +1,9 @@
-from dotenv import load_dotenv
 import os
-from celery.schedules import crontab
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
 
+from celery.schedules import crontab
+from dotenv import load_dotenv
 
 # ============================================================
 # BASE DIRECTORY
@@ -42,6 +42,8 @@ INSTALLED_APPS = [
     # Third-party
     "django_filters",
     "rest_framework",
+    "drf_spectacular",
+    "drf_spectacular_sidecar",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "django_celery_beat",
@@ -204,7 +206,12 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ),
 
-        "DEFAULT_THROTTLE_CLASSES": [
+    "DEFAULT_PAGINATION_CLASS": (
+        "rest_framework.pagination.PageNumberPagination"
+    ),
+    "PAGE_SIZE": 5,
+
+    "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
@@ -222,11 +229,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ),
 
-    "DEFAULT_PAGINATION_CLASS": (
-        "rest_framework.pagination.PageNumberPagination"
-    ),
-
-    "PAGE_SIZE": 5,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 
@@ -382,3 +385,36 @@ AWS_S3_FILE_OVERWRITE = False
 AWS_DEFAULT_ACL = None
 AWS_QUERYSTRING_AUTH = True
 AWS_QUERYSTRING_EXPIRE = 300
+
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Django Job Portal API",
+    "DESCRIPTION": "API documentation for the Django Job Portal.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+
+    "REDOC_DIST": "SIDECAR",
+
+    "ENUM_NAME_OVERRIDES": {
+        "JobStatusEnum": "jobs.models.Job.STATUS_CHOICES",
+        "ApplicationStatusEnum": "jobs.models.Application.STATUS_CHOICES",
+        "AIInterviewStatusEnum": "jobs.models.AIInterview.STATUS_CHOICES",
+        "AIInterviewSessionStatusEnum": "jobs.models.AIInterviewSession.STATUS_CHOICES",
+        "InterviewScheduleStatusEnum": "jobs.models.InterviewSchedule.STATUS_CHOICES",
+        "InterviewReminderStatusEnum": "jobs.models.InterviewReminder.STATUS_CHOICES",
+        "SubscriptionStatusEnum": "billing.models.UserSubscription.STATUS_CHOICES",
+        "PaymentStatusEnum": "billing.models.PaymentTransaction.STATUS_CHOICES",
+    },
+
+    # Keep your existing ENUM_NAME_OVERRIDES here.
+
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+            },
+        },
+    },
+}

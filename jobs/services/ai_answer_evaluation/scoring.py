@@ -52,6 +52,13 @@ class AnswerScoringEngine:
             if word not in self.STOP_WORDS and len(word) > 2
         }
 
+    def _normalize_expected_keywords(self, expected_keywords):
+        """Normalize expected keywords for consistent matching."""
+        return {
+            keyword.lower().strip()
+            for keyword in expected_keywords
+        }
+
     def calculate_relevance(self, question, answer):
         """Calculate how relevant the answer is to the question."""
 
@@ -94,10 +101,9 @@ class AnswerScoringEngine:
 
         answer_keywords = self.extract_keywords(answer)
 
-        expected = {
-            keyword.lower().strip()
-            for keyword in expected_keywords
-        }
+        expected = self._normalize_expected_keywords(
+            expected_keywords
+        )
 
         matched = answer_keywords.intersection(expected)
 
@@ -163,10 +169,9 @@ class AnswerScoringEngine:
 
         answer_keywords = self.extract_keywords(answer)
 
-        expected = {
-            keyword.lower().strip()
-            for keyword in expected_keywords
-        }
+        expected = self._normalize_expected_keywords(
+            expected_keywords
+        )
 
         matched_keywords = sorted(
             answer_keywords.intersection(expected)

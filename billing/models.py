@@ -23,7 +23,10 @@ class SubscriptionPlan(models.Model):
     candidate_access_limit = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Maximum candidate profiles accessible. Leave blank for unlimited access.",
+        help_text=(
+            "Maximum candidate profiles accessible. "
+            "Leave blank for unlimited access."
+        ),
     )
     includes_analytics = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)

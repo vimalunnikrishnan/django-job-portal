@@ -1,16 +1,9 @@
 from datetime import timedelta
 
 from django.core.cache import cache
-from django.http import response
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
-
-from billing.services import (
-    get_active_subscription,
-    can_create_job,
-    can_access_candidate,
-)
 
 from accounts.models import User
 from billing.models import (
@@ -19,8 +12,11 @@ from billing.models import (
     SubscriptionPlan,
     UserSubscription,
 )
-from billing.services import get_active_subscription
-from billing.services import can_create_job
+from billing.services import (
+    can_access_candidate,
+    can_create_job,
+    get_active_subscription,
+)
 from jobs.models import Job
 
 

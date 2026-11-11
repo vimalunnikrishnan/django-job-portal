@@ -3,8 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from accounts.models import User
-from billing.models import UserSubscription, CandidateProfileAccess
-
+from billing.models import CandidateProfileAccess, UserSubscription
 
 SUBSCRIPTION_GRACE_PERIOD_DAYS = 3
 

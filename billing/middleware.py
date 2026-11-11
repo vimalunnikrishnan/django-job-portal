@@ -1,8 +1,3 @@
-from rest_framework.permissions import BasePermission, IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
-
-
-
 class PremiumAccessMiddleware:
     """
     Django middleware placeholder for premium access routing.
