@@ -114,7 +114,7 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Open Swagger API documentation: http://127.0.0.1:8000/api/docs/
+Live API documentation: http://13.211.133.220/api/docs/
 
 ## API Documentation
 
@@ -122,9 +122,9 @@ When the development server is running:
 
 | Documentation | Endpoint |
 |---|---|
-| Swagger UI | `/api/docs/` |
-| ReDoc | `/api/redoc/` |
-| OpenAPI Schema | `/api/schema/` |
+| Swagger UI | [Open Swagger](http://13.211.133.220/api/docs/) |
+| ReDoc | [Open ReDoc](http://13.211.133.220/api/redoc/) |
+| OpenAPI Schema | [Download schema](http://13.211.133.220/api/schema/) |
 
 ### Main API Routes
 
@@ -165,4 +165,6 @@ The project also includes Locust configuration for load-testing experiments.
 GitHub: https://github.com/vimalunnikrishnan
 
 LinkedIn: https://www.linkedin.com/in/vimal-u-3a9405374
+
+
 
